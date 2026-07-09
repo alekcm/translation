@@ -45,11 +45,11 @@ label main_quest_02_recap:
     elif main_quest_02.stage == 0:
         tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
         jump tucker_generic_cont
-    elif main_quest_01.missionvar1 == True: # passed the first mission
+    elif main_quest_01.missionvar1 == True:
         "The last mission was complete so come back tomorrow and I will have some info for you"
         jump tucker_generic_cont
-
     else:
+
         jump main_quest_none_recap
 
 label main_quest_03_recap:
@@ -111,11 +111,11 @@ label main_quest_02_recap:
     elif main_quest_02.stage == 0:
         tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
         jump tucker_generic_cont
-    elif main_quest_01.missionvar1 == True: # passed the first mission
+    elif main_quest_01.missionvar1 == True:
         "The last mission was complete so come back tomorrow and I will have some info for you"
         jump tucker_generic_cont
-
     else:
+
         jump main_quest_none_recap
 
 label main_quest_03_recap:
@@ -155,6 +155,7 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_01_recap ===
@@ -182,11 +183,11 @@ label main_quest_02_recap:
     elif main_quest_02.stage == 0:
         tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
         jump tucker_generic_cont
-    elif main_quest_01.missionvar1 == True: # passed the first mission
+    elif main_quest_01.missionvar1 == True:
         "The last mission was complete so come back tomorrow and I will have some info for you"
         jump tucker_generic_cont
-
     else:
+
         jump main_quest_none_recap
 
 label main_quest_03_recap:
@@ -226,6 +227,7 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_02_recap ===
@@ -247,11 +249,11 @@ label main_quest_02_recap:
     elif main_quest_02.stage == 0:
         tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
         jump tucker_generic_cont
-    elif main_quest_01.missionvar1 == True: # passed the first mission
+    elif main_quest_01.missionvar1 == True:
         "The last mission was complete so come back tomorrow and I will have some info for you"
         jump tucker_generic_cont
-
     else:
+
         jump main_quest_none_recap
 
 label main_quest_03_recap:
@@ -291,6 +293,7 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_03_recap ===
@@ -331,6 +334,7 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_04_recap ===
@@ -367,6 +371,7 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_05_recap ===
@@ -398,12 +403,14 @@ label main_quest_05_recap:
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_endofcontent ===
 label main_quest_endofcontent:
     tucker.name "You have reached the end of content for The Institute missions for now."
     jump tucker_generic_cont
+# Decompiled by unrpyc: https://github.com/CensoredUsername/unrpyc
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_a_briefing.rpy: label main_quest_01_briefing ===
@@ -439,7 +446,7 @@ label main_quest_01_briefing:
         tucker.name "Call it what you will. Are you ready to do something for us? Your first mission so to speak."
     else:
         tucker.name "Well, as I explained before. With your situation it would be highly destructive to yourself if you were to divulge anything that goes on here."
-        $ player.face_suspicious() 
+        $ player.face_suspicious()
         pc "Chopped up on a lab table for the secrets of a new body? Why is this not something you want for me?"
         $ player.face_frown()
         tucker.name "Well why would we need to? We already have the secrets. What we need now is data. Are there side effects? How do you mentally recover? That sort of thing."
@@ -478,7 +485,7 @@ label main_quest_01_briefing:
     tucker.name "We want you to somehow find out what he knows or what his aims are. Strike up a conversation with him and try and get the info."
     pc "Not break into his flat or pickpocket him or something?"
     tucker.name "Are you even capable of either of those?"
-    tucker.name "No, as I mentioned before, we expect you to fail. You have zero training in such things so to expect anything else is unreasonable." 
+    tucker.name "No, as I mentioned before, we expect you to fail. You have zero training in such things so to expect anything else is unreasonable."
     tucker.name "The real goal is to spook him. This will either scare him away or have him lead us to any co-conspirators."
     tucker.name "The final result really doesn't matter. Getting you on board and getting practice is our ultimate goal. So give it a go with no pressure."
     pc "Speak to the reporter, [simon.fullname], in the pub and find out what he knows? Ok. I will think about it."
@@ -486,7 +493,7 @@ label main_quest_01_briefing:
     $ player.face_normal()
     $ main_quest_01.stage = 1
     $ log.markdone("mq_01_a")
-    jump tucker_generic_cont  
+    jump tucker_generic_cont
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter1 ===
@@ -502,35 +509,35 @@ label main_quest_01_reporter1:
         menu:
             "Yes, look around for him.":
                 jump main_quest_01_reporter_start
-
             "Not right now.":
+
                 jump travel
 
 label main_quest_01_reporter_start_cheat:
     "Resetting mission variables. Make sure to make a new save because this cheat may break the main mission if you have already passed this point in The Institute chain."
     $ main_quest_01 = QuestClass()
-    $ simon = Npc(fname="Simon", sname="Banks") # Reporter npc from the first main quest
-    $ bob = Npc(fname="Bob", sname="Cray") # Target for the reporter mission
+    $ simon = Npc(fname="Simon", sname="Banks")
+    $ bob = Npc(fname="Bob", sname="Cray")
     jump main_quest_01_reporter_start
 
-#################################
-### START LABELS
-#################################
+
+
+
 
 label main_quest_01_reporter_start:
     $ player.face_neutral()
     pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
     pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
     menu:
-        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+        "They didn't give me this sexpot body for nothing"(badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
             $ add_to_list(main_quest_01.list, "sex_branch")
             jump main_quest_01_reporter_sex_branch
+        "I could try and intimidate him"(badge="int_5", enabled=player.check_speech(4, notif=False)):
 
-        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
             $ add_to_list(main_quest_01.list, "intimidate_branch")
             jump main_quest_01_reporter_intimidate_branch
+        "Just chatting with him should do the trick"(badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
 
-        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
             $ add_to_list(main_quest_01.list, "talk_branch")
             pc "I guess a more direct approach could work."
             show simon at right1 with dissolve
@@ -539,23 +546,23 @@ label main_quest_01_reporter_start:
             pc "Huh?"
             simon.name "Sent by The Institute?"
             jump main_quest_01_reporter_intro_busted
+        "Dress in my bar clothes and try and get close to him"(badge="allure_6", enabled=pub_waitress.timesworked > 4):
 
-        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
             $ add_to_list(main_quest_01.list, "waitress_branch")
             jump main_quest_01_reporter_bargirl_branch
-
         "Sit near him and take it from there I suppose":
+
             $ add_to_list(main_quest_01.list, "wait_branch")
             jump main_quest_01_reporter_intro_drink
-
         "I'll think about it and come back another day":
+
             pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
             $ walk(loc_revel)
             jump travel
 
-#################################
-### SEX BRANCH LABELS
-#################################
+
+
+
 
 label main_quest_01_reporter_sex_branch:
     pcm "Time to put it to work I suppose..."
@@ -576,28 +583,28 @@ label main_quest_01_reporter_sex_branch:
 label main_quest_01_reporter_start_cheat:
     "Resetting mission variables. Make sure to make a new save because this cheat may break the main mission if you have already passed this point in The Institute chain."
     $ main_quest_01 = QuestClass()
-    $ simon = Npc(fname="Simon", sname="Banks") # Reporter npc from the first main quest
-    $ bob = Npc(fname="Bob", sname="Cray") # Target for the reporter mission
+    $ simon = Npc(fname="Simon", sname="Banks")
+    $ bob = Npc(fname="Bob", sname="Cray")
     jump main_quest_01_reporter_start
 
-#################################
-### START LABELS
-#################################
+
+
+
 
 label main_quest_01_reporter_start:
     $ player.face_neutral()
     pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
     pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
     menu:
-        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+        "They didn't give me this sexpot body for nothing"(badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
             $ add_to_list(main_quest_01.list, "sex_branch")
             jump main_quest_01_reporter_sex_branch
+        "I could try and intimidate him"(badge="int_5", enabled=player.check_speech(4, notif=False)):
 
-        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
             $ add_to_list(main_quest_01.list, "intimidate_branch")
             jump main_quest_01_reporter_intimidate_branch
+        "Just chatting with him should do the trick"(badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
 
-        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
             $ add_to_list(main_quest_01.list, "talk_branch")
             pc "I guess a more direct approach could work."
             show simon at right1 with dissolve
@@ -606,23 +613,23 @@ label main_quest_01_reporter_start:
             pc "Huh?"
             simon.name "Sent by The Institute?"
             jump main_quest_01_reporter_intro_busted
+        "Dress in my bar clothes and try and get close to him"(badge="allure_6", enabled=pub_waitress.timesworked > 4):
 
-        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
             $ add_to_list(main_quest_01.list, "waitress_branch")
             jump main_quest_01_reporter_bargirl_branch
-
         "Sit near him and take it from there I suppose":
+
             $ add_to_list(main_quest_01.list, "wait_branch")
             jump main_quest_01_reporter_intro_drink
-
         "I'll think about it and come back another day":
+
             pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
             $ walk(loc_revel)
             jump travel
 
-#################################
-### SEX BRANCH LABELS
-#################################
+
+
+
 
 label main_quest_01_reporter_sex_branch:
     pcm "Time to put it to work I suppose..."
@@ -661,15 +668,15 @@ label main_quest_01_reporter_start:
     pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
     pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
     menu:
-        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+        "They didn't give me this sexpot body for nothing"(badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
             $ add_to_list(main_quest_01.list, "sex_branch")
             jump main_quest_01_reporter_sex_branch
+        "I could try and intimidate him"(badge="int_5", enabled=player.check_speech(4, notif=False)):
 
-        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
             $ add_to_list(main_quest_01.list, "intimidate_branch")
             jump main_quest_01_reporter_intimidate_branch
+        "Just chatting with him should do the trick"(badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
 
-        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
             $ add_to_list(main_quest_01.list, "talk_branch")
             pc "I guess a more direct approach could work."
             show simon at right1 with dissolve
@@ -678,23 +685,23 @@ label main_quest_01_reporter_start:
             pc "Huh?"
             simon.name "Sent by The Institute?"
             jump main_quest_01_reporter_intro_busted
+        "Dress in my bar clothes and try and get close to him"(badge="allure_6", enabled=pub_waitress.timesworked > 4):
 
-        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
             $ add_to_list(main_quest_01.list, "waitress_branch")
             jump main_quest_01_reporter_bargirl_branch
-
         "Sit near him and take it from there I suppose":
+
             $ add_to_list(main_quest_01.list, "wait_branch")
             jump main_quest_01_reporter_intro_drink
-
         "I'll think about it and come back another day":
+
             pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
             $ walk(loc_revel)
             jump travel
 
-#################################
-### SEX BRANCH LABELS
-#################################
+
+
+
 
 label main_quest_01_reporter_sex_branch:
     pcm "Time to put it to work I suppose..."
@@ -816,8 +823,8 @@ label main_quest_01_reporter_sex_branch:
                 jump main_quest_01_reporter_sex_branch_prepare
             else:
                 jump main_quest_01_reporter_intro_rejectsex
-                
         else:
+
             pc "So you want me to pay like that for the info?"
 
 
@@ -832,7 +839,7 @@ label main_quest_01_reporter_sex_branch_prepare:
         with dissolve
         pcm "No one here."
         "I wave at [simon.name] to come in."
-        show simon at right1 with dissolve 
+        show simon at right1 with dissolve
         simon.name "Err, are we allowed back here?"
         pc "It's fine. I work here so no one will bother us."
     else:
@@ -840,7 +847,7 @@ label main_quest_01_reporter_sex_branch_prepare:
         with dissolve
         pcm "No one here."
         "I wave at [simon.name] to come in."
-        show simon at right1 with dissolve 
+        show simon at right1 with dissolve
         simon.name "Err, you sure?"
         pc "You see any women in the pub other than me?"
         simon.name "Not many."
@@ -859,8 +866,8 @@ label main_quest_01_reporter_sex_branch_prepare:
     if player.check_sex_agree_choice(diff=2, option1="Right, okay then", option2="Err, no. I'm ending this now"):
         $ add_to_list(main_quest_01.list, "sex_branch_sex")
         jump main_quest_01_reporter_sex_branch_sex
-
     else:
+
         $ player.face_worried()
         pc "Sorry, I was hoping you would slip up. But it's gone a bit too far."
         simon.name "Backing out of it?"
@@ -888,7 +895,7 @@ label main_quest_01_reporter_sex_branch_prepare:
                 elif c.braless and c.clevage:
                     simon.name "Couldn't take my eyes off those bouncing tits since you walked in."
                 elif c.pokenips and (outside or player.desire > 70):
-                    simon.name "Could say the same with your nipples."   
+                    simon.name "Could say the same with your nipples."
                 elif player.allure > 100:
                     simon.name "How can I not be when you are dressed like that."
                 else:
@@ -900,8 +907,8 @@ label main_quest_01_reporter_sex_branch_prepare:
                 pc "Come here."
                 $ npc_race_picker(simon)
                 jump main_quest_01_reporter_game_naked_blowjob
-
             "No, it's still too much.":
+
 
 
 # === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_sex_branch_sex ===
@@ -960,7 +967,7 @@ label main_quest_01_reporter_sex_branch_sex:
 
     simon.name "Let's see what you have."
     $ npc_race_picker(simon)
-    show sb_againstwall2 
+    show sb_againstwall2
     hide simon
     with dissolve
     simon.name "Such a perfect arse."
@@ -1003,16 +1010,16 @@ label main_quest_01_reporter_bargirl_branch:
     pause 0.5
     pcm "Right, looks like he is low on booze."
     $ npc_race_picker(simon)
-    show pub_serve_talking 
+    show pub_serve_talking
     $ player.face_happy()
     with dissolve
     pc "Hey sweetheart, get you another?"
     simon.name "Err, sure."
-    hide pub_serve_talking 
+    hide pub_serve_talking
     $ player.face_neutral()
     with dissolve
     "I head over to the bar and grab a couple of beers from behind the counter."
-    show pub_serve_clevage 
+    show pub_serve_clevage
     $ player.face_happy()
     with dissolve
     pc "Here you go darling."
@@ -1054,8 +1061,8 @@ label main_quest_01_reporter_bargirl_branch:
             trixie.name "Yeah when he can afford it. Mostly just drowns his sorrows and whines to anyone who listens."
             pc "Whines?"
             trixie.name "Yeah, wife not treatin' him well or some sob story like that. Who knows with a drunkard. Don't really care as long as he pays up."
-            
         else:
+
             pc "He a pervert like the rest?"
             trixie.name "Of course. Doesn't normally have the cash to keep anyone's attention, but now and then he has a bit."
             pc "He... Errr... You know..."

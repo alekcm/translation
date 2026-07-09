@@ -11,8 +11,7 @@ after_load.rpy:103: $ girl_dummy_6 = Npc(fname="Dummy", sname="Girl", is_female=
 after_load.rpy:110: $ perk_slutty = PerkClass("Looking slutty", "I am dressed in a really revealing way. People no doubt think I am a slut.", "perk_slutty", desire_min=50, desire_max=150, confidence_add=5)
 after_load.rpy:111: $ perk_pervert = PerkClass("Perverted", "I look like a pervert.", "perk_pervert", desire_min=50, desire_max=150, confidence_add=-5)
 after_load.rpy:1121: $ salongirl = Npc(fname="Beautician", sname="", colour="#ec98ef", is_female=True, isslut=True)
-after_load.rpy:1141: $ neighbour = Npc(fname="Violet", sname="Blunt", colour="#ec98ef", is_female=True, iswhore=True) # Slum neighbout girl
-after_load.rpy:1168: $ pre_bf = Npc(fname="Boyfriend", sname="", nname="", pregname="I am carrying the child of a guy I was dating before the world went to shit.", virginname="a guy I was dating when I was a teenager.", is_unique=True) # Make unique to avoid slut calulation
+after_load.rpy:1141: $ neighbour = Npc(fname="Violet", sname="Blunt", colour="#ec98ef", is_female=True, iswhore=True)
 after_load.rpy:1181: $ item_bottom_39 = Item("MINI DAISY DUKES", "A pair of low rise jeans, cut off at the bottom to form a pair of hot pants.", "item_bottom_39", type="bottom", outfit=["daily", "sport", "home"], ass=True, slutty=True, value=80)
 after_load.rpy:1227: $ perk_slutty = PerkClass("Looking slutty", "I am dressed in a really revealing way. People no doubt think I am a slut.", "perk_slutty", desire_min=50, desire_max=150, confidence_add=5)
 after_load.rpy:1228: $ perk_pervert = PerkClass("Perverted", "I look like a pervert.", "perk_pervert", desire_min=50, desire_max=150, confidence_add=-5)
@@ -60,13 +59,11 @@ after_load.rpy:451: $ item_bottom_31 = Item("LATEX TROUSERS", "A pair of latex t
 after_load.rpy:453: $ perk_pregband_preg = PerkClass("Belly support", "Ahh, so much better on my back.", "perk_pregband", confidence_add=5, mood_add=10)
 after_load.rpy:455: $ perk_gagged_locked = PerkClass("Gagged", "Mmmmff nnnngggfff aaahhh ffffmmmmm...", "perk_gagged_locked", desire_min=150, desire_max=300, allure_add=200, int_max=-200, int_add=-200, confidence_add=-30)
 after_load.rpy:456: $ perk_blind = PerkClass("Blindfolded", "I can't see a thing!", "perk_blind", confidence_add= -100, fitness_add= -100)
-after_load.rpy:467: $ streetpervert = Npc(fname="Pervert", sname="", pregname="I am carrying the child of a pervert who I let fuck me in the bushes", virginname="some random pervert who fucked me", abort=True) # random person who offers money for sex
 after_load.rpy:482: $ item_outfit_36 = Item("HIGH LEG GOWN", "A gown with a high let slit. Low cut with sleeves", "item_outfit_36", type="outfit", outfit=["daily", "party"], ass=True, skirt=True, slutty=True, pokenips=True, value=400)
 after_load.rpy:525: $ whore = Npc(fname="Patron", sname="", colour="#fdbcff", is_female=True, iswhore=True)
 after_load.rpy:533: $ item_outfit_37 = Item("CRUMPLE DRESS", "A dress with a crumple effect", "item_outfit_37", type="outfit", outfit=["daily", "party"], ass=True, skirt=True, slutty=True, pokenips=True, value=400)
 after_load.rpy:544: $ item_outfit_39 = Item("RUFFLED BABYDOLL", "A sheer pair of pyjamas with ruffles barely leaving something to the imagination.", "item_outfit_39", type="outfit", outfit=["daily", "party", "home"], ass=True, skirt=True, slutty=True, clevage=True, value=200)
-after_load.rpy:566: $ punter = Npc(fname="Punter", sname="", pregname="I am carrying the child of one of some punter", virginname="some random punter", abort=True) # random person who offers money for sex
-after_load.rpy:567: $ whore = Npc(fname="Whore", sname="", colour="#fdbcff", is_female=True, iswhore=True) # random whore
+after_load.rpy:567: $ whore = Npc(fname="Whore", sname="", colour="#fdbcff", is_female=True, iswhore=True)
 after_load.rpy:58: $ item_bottom_17 = Item("FLARED SHORTS", "A heavily flared pair of shorts giving maximum movement and freedom. Often mistaken for a skirt.", "item_bottom_17", type="bottom", outfit=["daily", "sport", "home"], ass=True, slutty=True, value=180)
 after_load.rpy:773: $ hucow = Npc(fname="Milkmaid", sname="Hucow", colour="#d6d5b9", is_female=True, iswhore=True)
 after_load.rpy:805: $ perk_bitch = PerkClass("Bitch", "I am wearing clothes that indicate to those calling themselves \"the wolf pack\" that I am playing their game.", "perk_bitch", desire_min=50, desire_max=150, confidence_add=5, allure_add=50)
@@ -129,7 +126,7 @@ gui.rpy:236: define config.thumbnail_height = 216
 gui.rpy:239: define gui.file_slot_cols = 3
 gui.rpy:240: define gui.file_slot_rows = 2
 gui.rpy:250: define gui.navigation_xpos = 60
-gui.rpy:253: define gui.skip_ypos = 56 #15
+gui.rpy:253: define gui.skip_ypos = 56
 gui.rpy:256: define gui.notify_ypos = 68
 gui.rpy:259: define gui.choice_spacing = 33
 gui.rpy:262: define gui.navigation_spacing = 6
@@ -240,15 +237,12 @@ patches.rpy:17: define havguard3 = Character('Haven guard 3', color="#ffffff")
 patches.rpy:181: $ class_updater(Npc,("is_female","is_pregnant", "iswhore"), False)
 patches.rpy:182: $ cass = Npc(fname="Cassidy", sname="O'Reilly", nname="Cass", is_female=True)
 patches.rpy:183: $ mira = Npc(fname="Mira", sname="Bhatti", is_female=True, iswhore=True)
-patches.rpy:184: $ punter = Npc(fname="Punter", sname="", pregname="I am carrying the child of one of some punter", virginname="some random punter") # random person who offers money for sex
 patches.rpy:187: $ (svet.is_female, dani.is_female, anabel.is_female, rachel.is_female, emile.is_female, betty.is_female) = (True, True, True, True, True, True)
 patches.rpy:191: $ class_list_creator(Npc, "npc_girls", "is_female", True)
 patches.rpy:20: define havengateguard.name = Character('Haven gate guard', color="#ffffff")
 patches.rpy:21: define havenmeanguard.name = Character('Haven mean guard', color="#ffffff")
 patches.rpy:220: $ player._confidence = 35.0
-patches.rpy:23: define havguardw = Character('Haven guard', color="#ffffff") # We change this for the next catcher for whore dialouge
-patches.rpy:250: $ parkpervert_dani = Npc(fname="Pervert", sname="", pregname="I am carrying the child of a pervert in the park who I let fuck me in the bushes", virginname="some random pervert who fucked me in the bushes") # random person who offers money for sex
-patches.rpy:255: $ busgroper = Npc(fname="Bus", sname="groper", pregname="I am carrying the child of a pervert from the bus", virginname="some random pervert who I let fuck me on the bus") # random person who offers money for sex
+patches.rpy:23: define havguardw = Character('Haven guard', color="#ffffff")
 patches.rpy:92: $ c._slutty = False
 patches.rpy:93: $ school._slutty = False
 patches.rpy:94: $ daily._slutty = False
@@ -272,12 +266,9 @@ screens.rpy:713: define gui.about = ""
 screens.rpy:749: default page_name_value = FilePageNameInputValue(pattern=_("Page {}"), auto=_("Automatic saves"), quick=_("Quick saves"))
 screens.rpy:98: define test_what = ""
 script.rpy:104: default emile_tutorial_info = 0
-script.rpy:133: #$ log.assign("Introduction to the Institute")
-script.rpy:161: $ player.add_conf(-100) # The new day event will often add confidence to low conf characters. This zeros it out so the prologue works correctly.
 script.rpy:180: $ fname = "Samantha"
 script.rpy:230: $ player.add_money(200)
 script.rpy:275: $ log.assign("Introduction to The Institute")
-script.rpy:295: $ player.add_conf(-100) # The new day event will often add confidence to low conf characters. This zeros it out so the prologue works correctly.
 scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_a_briefing.rpy:1: default main_quest_01_qs = 0
 scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_a_briefing.rpy:2: default main_quest_01_passed = False
 scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy:1283: $ add_to_list(main_quest_01.list, "bob_mission_accepted")
@@ -293,12 +284,10 @@ scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_c_bob_sex.rpy
 scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_c_bob_sex.rpy:979: $ player.add_money(150)
 scripts\a_quests\a_main_quest_missions\main_quest_03\main_quest_03_a_fixer.rpy:110: $ player.add_money(2000)
 scripts\a_quests\a_main_quest_missions\main_quest_03\main_quest_03_a_fixer.rpy:1: default main_quest_03_qs = 0
-scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:1: default mission_day = 0 # This variable is to count how many days have passed since your last mission. Used so you can't start new ones right away.
-scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:2: default main_quest_level = 0 # What quest you are on
+scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:1: default mission_day = 0
+scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:2: default main_quest_level = 0
 scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:4: define reporter = Character("Simon", color="#ffffff")
 scripts\a_quests\a_main_quest_missions\main_quest_vars.rpy:5: define reporters = "Banks"
-scripts\characters\aa_colour_tint\aa_colour_tint.rpy:36: # define eil = Character("Eileen", callback = name_callback, cb_name = "eileen")
-scripts\characters\aa_colour_tint\aa_colour_tint.rpy:43: # define narrator = Character(callback = name_callback, cb_name = None)
 scripts\characters\aa_colour_tint\aa_colour_tint.rpy:72: define sprite_focus = {}
 scripts\characters\aa_colour_tint\aa_colour_tint.rpy:79: default speaking_char = None
 scripts\characters\aa_colour_tint\aa_colour_tint.rpy:81: default test_name_test = None
@@ -323,11 +312,6 @@ scripts\characters\flatmates\robin\robin_talk\robin_talk_sexobject_events.rpy:38
 scripts\characters\flatmates\robin\robin_talk\robin_talk_sexobject_events.rpy:394: $ player.sex_cum(robinman, "inside", quest_robinslut)
 scripts\characters\flatmates\robin\robin_talk\robin_talk_sexobject_events.rpy:396: $ player.sex_cum(robinman, "anal", quest_robinslut)
 scripts\characters\flatmates\robin\robin_talk\robin_talk_sexobject_events.rpy:597: $ robin.isslut = True
-scripts\characters\hospital_staff.rpy:10: # define doc = Character("Dr. Nikolas", color="#ffffff")
-scripts\characters\hospital_staff.rpy:11: # define nu = Character("Nurse Camilla", color="#ffffff")
-scripts\characters\hospital_staff.rpy:12: # define receptionist.name = Character("Hospital Receptionist", color="#ffffff")
-scripts\characters\hospital_staff.rpy:13: # # define tuc = Character("Dr. Tucker", color="#ffffff")
-scripts\characters\hospital_staff.rpy:14: # define psy = Character("Dr. Brooker", color="#ffffff")
 scripts\characters\institute\tucker.rpy:1: define tuc = Character("Dr. Tucker", color="#ffffff")
 scripts\characters\institute\tucker.rpy:2: define tucker = "Tucker"
 scripts\characters\institute\tucker.rpy:3: default met_tucker = False
@@ -363,11 +347,11 @@ scripts\core\cheats_menu.rpy:81: define speaking_char_class = ""
 scripts\core\definitions.rpy:151: default cheats = 0
 scripts\core\definitions.rpy:152: default danger_content = False
 scripts\core\definitions.rpy:153: default danger_day_limit = True
-scripts\core\definitions.rpy:154: default force_return = False # on the rare case I want to return out of a jumped label. It forces the travel label to return
-scripts\core\definitions.rpy:160: default tf_age = 0 # If the pc used to be older or younger in their past life
-scripts\core\definitions.rpy:161: default tf_weight = 0 # If the pc was fat, skinny or normal
-scripts\core\definitions.rpy:162: default tf_gay = False # If the pc was gay.
-scripts\core\definitions.rpy:163: default tf_virgin = True # If the pc was a virgin in their past life
+scripts\core\definitions.rpy:154: default force_return = False
+scripts\core\definitions.rpy:160: default tf_age = 0
+scripts\core\definitions.rpy:161: default tf_weight = 0
+scripts\core\definitions.rpy:162: default tf_gay = False
+scripts\core\definitions.rpy:163: default tf_virgin = True
 scripts\core\definitions.rpy:168: define district_home = ("bedroom", "bathroom", "common", "hallway", "kitchen")
 scripts\core\definitions.rpy:169: define district_residential = ("residential_area", "residential_area_kiosk", "busstop_residential_area")
 scripts\core\definitions.rpy:170: define district_commercial = ("commercial_area", "commercial_area_mall", "busstop_commercial_area")
@@ -392,7 +376,7 @@ scripts\core\definitions.rpy:189: define evening = (20,21,22)
 scripts\core\definitions.rpy:190: define night = (23,0,1,2,3,4,5)
 scripts\core\definitions.rpy:191: define workhours = (8,9,10,11,12,13,14,15,16,17,18)
 scripts\core\definitions.rpy:192: define work_hours = workhours
-scripts\core\definitions.rpy:193: define schoolhours = (8,9,10,11,12,13) # This is not when school is in session, but when school people will be around the school
+scripts\core\definitions.rpy:193: define schoolhours = (8,9,10,11,12,13)
 scripts\core\definitions.rpy:194: define school_hours = schoolhours
 scripts\core\definitions.rpy:196: define rushhour = (8,9,16,17,18)
 scripts\core\definitions.rpy:197: define dark = [0,1,2,3,4,21,22,23]
@@ -406,46 +390,36 @@ scripts\core\definitions.rpy:205: default npc_girls_pregnant = []
 scripts\core\definitions.rpy:206: default npc_girls_whore = []
 scripts\core\definitions.rpy:211: default hide_background_screen = False
 scripts\core\definitions.rpy:212: define background_image_screen = ""
-scripts\core\definitions.rpy:213: default timeofday = "day" # Not used but don't want to delete in case something uses it
+scripts\core\definitions.rpy:213: default timeofday = "day"
 scripts\core\definitions.rpy:224: define gui.dialogue_text_outlines = [ (2, "#00000080", 0, 0) ]
 scripts\core\definitions.rpy:225: define gui.name_text_outlines = [ (2, "#00000080", 0, 0) ]
 scripts\core\definitions.rpy:232: default wardrobe_tutorial = False
-scripts\core\definitions.rpy:235: define me = Character('Me', color="#ffffff", callback=name_callback, cb_name="pc", image="pc") # Only used when the player doesnt know the characters name
-scripts\core\definitions.rpy:236: define mem = Character('Me', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=name_callback, cb_name="pc", image="pc") # Only used when the player doesnt know the characters name. This is her internal voice
+scripts\core\definitions.rpy:235: define me = Character('Me', color="#ffffff", callback=name_callback, cb_name="pc", image="pc")
+scripts\core\definitions.rpy:236: define mem = Character('Me', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=name_callback, cb_name="pc", image="pc")
 scripts\core\definitions.rpy:237: default fname = "Samantha"
 scripts\core\definitions.rpy:238: default sname = "Bangtail"
 scripts\core\definitions.rpy:239: default name = "Sammy"
-scripts\core\definitions.rpy:240: default wname = "Doxie" # Whore name
-scripts\core\definitions.rpy:241: define pc = Character('[name]', color="#ffffff", callback=[dialogue_catcher_talk, name_callback], cb_name="pc", image="pc") # Normal speaking
-scripts\core\definitions.rpy:242: define pcm = Character('[name]', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=[dialogue_catcher_think, name_callback], cb_name="pc", image="pc") # Thinking
-scripts\core\definitions.rpy:243: define pcg = Character('[name]', color="#ffffff",callback=[name_callback], cb_name="pc", image="pc") # Gagged version of the PC
-scripts\core\definitions.rpy:244: define pcc = Character('[name]', color="#ffffff",callback=[dialogue_catcher_talk_end, name_callback], cb_name="pc", image="pc") # A clean version
-scripts\core\definitions.rpy:245: define pcmc = Character('[name]', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=[name_callback], cb_name="pc", image="pc") # A clean version of thinking
-scripts\core\definitions.rpy:246: default tempname = "" # This is for instances where we roll a rndom name
+scripts\core\definitions.rpy:240: default wname = "Doxie"
+scripts\core\definitions.rpy:241: define pc = Character('[name]', color="#ffffff", callback=[dialogue_catcher_talk, name_callback], cb_name="pc", image="pc")
+scripts\core\definitions.rpy:242: define pcm = Character('[name]', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=[dialogue_catcher_think, name_callback], cb_name="pc", image="pc")
+scripts\core\definitions.rpy:243: define pcg = Character('[name]', color="#ffffff",callback=[name_callback], cb_name="pc", image="pc")
+scripts\core\definitions.rpy:244: define pcc = Character('[name]', color="#ffffff",callback=[dialogue_catcher_talk_end, name_callback], cb_name="pc", image="pc")
+scripts\core\definitions.rpy:245: define pcmc = Character('[name]', who_color="#ffffff", what_color='#b3b3b3', what_prefix='(-', what_suffix='-)', callback=[name_callback], cb_name="pc", image="pc")
+scripts\core\definitions.rpy:246: default tempname = ""
 scripts\core\definitions.rpy:247: default tempname2 = ""
 scripts\core\definitions.rpy:248: default tempname3 = ""
-scripts\core\definitions.rpy:250: define nadia = Character('Nadia', color="#ffffff") # Short name for the character
+scripts\core\definitions.rpy:250: define nadia = Character('Nadia', color="#ffffff")
 scripts\core\definitions.rpy:251: define nadianame = "Nadia Pallavi"
 scripts\core\definitions.rpy:253: default event_end_interrupt_label = ""
 scripts\core\definitions.rpy:258: define emile.name = Character('Emilie', color="#ffffff")
 scripts\core\definitions.rpy:259: define sism = Character('Emilie', color="#ffffff")
-scripts\core\definitions.rpy:263: # define mira = Character('Mira', color="#ffffff")
-scripts\core\definitions.rpy:264: # define cass = Character('Cassidy', color="#ffffff")
-scripts\core\definitions.rpy:266: # define svet = Character('Svetlana', color="#ffffff") # Dance troupe leader
 scripts\core\definitions.rpy:268: define headt = Character('Head teacher', color="#ffffff")
-scripts\core\definitions.rpy:269: # define mason = Character('Mr. Mason', color="#ffffff") # The school gym teacher
-scripts\core\definitions.rpy:270: define carlson = Character('Miss Carlson', color="#ffffff") # The womens history teacher
-scripts\core\definitions.rpy:271: define oneil = Character('Mr O\'Neill', color="#ffffff") # Plauge history teacher
-scripts\core\definitions.rpy:272: define abbott = Character('Mr Abbott', color="#ffffff") # Economy history teacher
-scripts\core\definitions.rpy:274: # define 1teach = Character('Science teacher', color="#ffffff")
-scripts\core\definitions.rpy:275: # define 2teach = Character('Maths teacher', color="#ffffff")
-scripts\core\definitions.rpy:276: # define 3teach = Character('English teacher', color="#ffffff")
-scripts\core\definitions.rpy:277: # define 4teach = Character('History teacher', color="#ffffff")
+scripts\core\definitions.rpy:270: define carlson = Character('Miss Carlson', color="#ffffff")
+scripts\core\definitions.rpy:271: define oneil = Character('Mr O\'Neill', color="#ffffff")
+scripts\core\definitions.rpy:272: define abbott = Character('Mr Abbott', color="#ffffff")
 scripts\core\definitions.rpy:278: define swimteach = Character('Swimming coach', color="#ffffff")
 scripts\core\definitions.rpy:279: define sportteach = Character('Sports coach', color="#ffffff")
 scripts\core\definitions.rpy:281: define brad = Character('Brad', color="#ffffff")
-scripts\core\definitions.rpy:284: # define trixie = Character('trixie', color="#ffffff")
-scripts\core\definitions.rpy:285: # define bob = Character('Bob', color="#ffffff")
 scripts\core\definitions.rpy:289: define jaz = Character('Jaz', color="#ffffff")
 scripts\core\definitions.rpy:293: define woman = Character('Woman', color="#ffffff")
 scripts\core\definitions.rpy:294: define man = Character('Man', color="#ffffff")
@@ -482,12 +456,12 @@ scripts\core\definitions.rpy:336: define pc_cash = 0
 scripts\core\definitions.rpy:337: define cashcard = 0
 scripts\core\definitions.rpy:350: define bus_travel_time = 0
 scripts\core\definitions.rpy:351: define bus_travel_loc = ""
-scripts\core\definitions.rpy:357: default loc_fromfrom = [] # This is the location one more step back. probably will never need it but its here just in case
-scripts\core\definitions.rpy:358: default loc_from = [] # This is the location you just left
-scripts\core\definitions.rpy:359: default loc_to = ["stairwell"] # This is the location you are heading towards, or where you already are
-scripts\core\definitions.rpy:360: default loc_home = True # This is to check if you are at home
-scripts\core\definitions.rpy:361: default loc_want = "" # This is for instances where you pick a location but we need to run checks before allowing you to go there
-scripts\core\definitions.rpy:362: default outside = False # Check if the player is outside and is effected by weather
+scripts\core\definitions.rpy:357: default loc_fromfrom = []
+scripts\core\definitions.rpy:358: default loc_from = []
+scripts\core\definitions.rpy:359: default loc_to = ["stairwell"]
+scripts\core\definitions.rpy:360: default loc_home = True
+scripts\core\definitions.rpy:361: default loc_want = ""
+scripts\core\definitions.rpy:362: default outside = False
 scripts\core\definitions.rpy:364: default visited_park = False
 scripts\core\definitions.rpy:365: default visited_market = False
 scripts\core\definitions.rpy:366: default visited_highway = False
@@ -504,24 +478,24 @@ scripts\core\definitions.rpy:377: default explored_commercial_area = False
 scripts\core\definitions.rpy:378: default explored_residential_area = False
 scripts\core\definitions.rpy:379: default explored_market = False
 scripts\core\definitions.rpy:381: default unlocked_police = False
-scripts\core\definitions.rpy:382: default unlocked_pub = False # the local pub unlocked by exploring your local area
-scripts\core\definitions.rpy:383: default unlocked_club = False # The nightclub unlocked by various characters. flatmate and shop worker and maybe more
+scripts\core\definitions.rpy:382: default unlocked_pub = False
+scripts\core\definitions.rpy:383: default unlocked_club = False
 scripts\core\definitions.rpy:384: default unlocked_strip_club = False
 scripts\core\definitions.rpy:385: default unlocked_porn_studio = False
 scripts\core\definitions.rpy:386: default unlocked_photostudio = False
-scripts\core\definitions.rpy:387: default unlocked_perv_club = False # The private club unlocked during the clothing shop questline
+scripts\core\definitions.rpy:387: default unlocked_perv_club = False
 scripts\core\definitions.rpy:388: default unlocked_highway_homeless = False
 scripts\core\definitions.rpy:389: default unlocked_highway_dealers = False
 scripts\core\definitions.rpy:390: default unlocked_highway_hookers = False
 scripts\core\definitions.rpy:392: default cosmetic_surgery_tutorial = True
-scripts\core\definitions.rpy:397: define totalMinutes = 60 # Not sure if this is used but don't want to delete
-scripts\core\definitions.rpy:398: define talk_counter = "blocked" # To count how many times a text box appeared and pass time
-scripts\core\definitions.rpy:399: define talk_counter_what = "" # To count how many times a text box appeared and pass time
-scripts\core\definitions.rpy:405: default go_sleep_prompt = False # If the player has been warned they are tired and should go to sleep. when set to true it will block further warning until reset
+scripts\core\definitions.rpy:397: define totalMinutes = 60
+scripts\core\definitions.rpy:398: define talk_counter = "blocked"
+scripts\core\definitions.rpy:399: define talk_counter_what = ""
+scripts\core\definitions.rpy:405: default go_sleep_prompt = False
 scripts\core\definitions.rpy:406: default late_warning = False
 scripts\core\definitions.rpy:407: default late_final_warning = False
 scripts\core\definitions.rpy:408: default shower_warning = False
-scripts\core\definitions.rpy:409: default lust_blocker = False # This is to prevent lust gain after a guy cums but you are still naked. Without blocking lust your nakedness would shoot it to 100
+scripts\core\definitions.rpy:409: default lust_blocker = False
 scripts\core\definitions.rpy:412: define temp_var_1 = False
 scripts\core\definitions.rpy:413: define temp_var_2 = False
 scripts\core\definitions.rpy:414: define temp_var_3 = False
@@ -545,19 +519,19 @@ scripts\core\definitions.rpy:435: default cheat_pregnancy_enabled = True
 scripts\core\definitions.rpy:436: default cheat_fetish_cumflation = False
 scripts\core\definitions.rpy:437: default cheat_fetish_preg_fantasy = False
 scripts\core\definitions.rpy:438: default global_pregnancy_length = 42
-scripts\core\definitions.rpy:440: default global_random_number = 0 # A number that picks 1-10 every midnight
-scripts\core\definitions.rpy:442: default global_random_hour_number = 0 # A number that picks 1-10 every hour
-scripts\core\definitions.rpy:443: default global_random_noon_number = 0 # A number that picks 1-10 every day at noon
+scripts\core\definitions.rpy:440: default global_random_number = 0
+scripts\core\definitions.rpy:442: default global_random_hour_number = 0
+scripts\core\definitions.rpy:443: default global_random_noon_number = 0
 scripts\core\diary_system\diary_screen.rpy:138: default diary_people_list_var = 1
 scripts\core\diary_system\diary_screen.rpy:139: default diary_people_list = []
 scripts\core\diary_system\diary_screen.rpy:140: default stats_screen_tab = 1
 scripts\core\diary_system\diary_screen.rpy:141: default quest_objectives_button = True
 scripts\core\diary_system\diary_screen.rpy:142: default selected_perk = None
-scripts\core\diary_system\diary_screen.rpy:144: define new_diary_diary_entry = True # True since its the game start
-scripts\core\diary_system\diary_screen.rpy:145: define new_diary_people_entry = True # True since its the game start
-scripts\core\diary_system\diary_screen.rpy:146: define new_diary_job_entry = True # True since its the game start
+scripts\core\diary_system\diary_screen.rpy:144: define new_diary_diary_entry = True
+scripts\core\diary_system\diary_screen.rpy:145: define new_diary_people_entry = True
+scripts\core\diary_system\diary_screen.rpy:146: define new_diary_job_entry = True
 scripts\core\diary_system\diary_screen.rpy:236: default stats_tab = 1
-scripts\core\functions\music.rpy:17: default block_walk_music = False # So that the walk() function does not update the music
+scripts\core\functions\music.rpy:17: default block_walk_music = False
 scripts\core\functions\music.rpy:19: define main_menu_music = "audio/hayden-folker-to-see-the-past.mp3"
 scripts\core\functions\music.rpy:20: define music_intro = "audio/hayden-folker-the-way-out-despair.mp3"
 scripts\core\functions\music.rpy:22: define music_dis_residential = "audio/hayden-folker-grace.mp3"
@@ -595,12 +569,8 @@ scripts\core\functions\npcs.rpy:853: $ motel_recep = Npc(fname="Receptionist", s
 scripts\core\functions\npcs.rpy:854: $ hucow = Npc(fname="Milkmaid", sname="Hucow", colour="#d6d5b9", is_female=True, iswhore=True)
 scripts\core\functions\npcs.rpy:855: $ flyergirl = Npc(fname="Flyerer", sname="", colour="#b9c8d6", is_female=True, iswhore=True)
 scripts\core\functions\npcs.rpy:856: $ salongirl = Npc(fname="Beautician", sname="", colour="#ec98ef", is_female=True, isslut=True)
-scripts\core\functions\npcs.rpy:857: $ neighbour = Npc(fname="Violet", sname="Blunt", colour="#ec98ef", is_female=True, iswhore=True) # Slum neighbout girl
-scripts\core\functions\npcs.rpy:860: $ pre_bf = Npc(fname="Boyfriend", sname="", nname="", pregname="", virginname="", is_unique=True) # Make unique to avoid slut calulation
-scripts\core\functions\npcs.rpy:867: $ whore = Npc(fname="Whore", sname="", colour="#fdbcff", is_female=True, iswhore=True, is_unique=False) # random whore
-scripts\core\functions\npcs.rpy:881: $ punter = Npc(fname="Punter", sname="", pregname="I am carrying the child of one of some punter", virginname="some random punter", abort=True, is_unique=False) # random person who offers money for sex
-scripts\core\functions\npcs.rpy:884: $ parkpervert_dani = Npc(fname="Pervert", sname="", pregname="I am carrying the child of a pervert in the park who I let fuck me in the bushes", virginname="some random pervert who fucked me in the bushes", abort=True, is_unique=False) # random person who offers money for sex
-scripts\core\functions\npcs.rpy:885: $ busgroper = Npc(fname="Groper", sname="on the bus", pregname="I am carrying the child of a pervert from the bus", virginname="some random pervert who I let fuck me on the bus", abort=True, is_unique=False) # random person who offers money for sex
+scripts\core\functions\npcs.rpy:857: $ neighbour = Npc(fname="Violet", sname="Blunt", colour="#ec98ef", is_female=True, iswhore=True)
+scripts\core\functions\npcs.rpy:867: $ whore = Npc(fname="Whore", sname="", colour="#fdbcff", is_female=True, iswhore=True, is_unique=False)
 scripts\core\functions\npcs.rpy:923: $ girl_dummy_1 = Npc(fname="Dummy", sname="Girl", is_female=True, isslut=True)
 scripts\core\functions\npcs.rpy:924: $ girl_dummy_2 = Npc(fname="Dummy", sname="Girl", is_female=True, isslut=True)
 scripts\core\functions\npcs.rpy:925: $ girl_dummy_3 = Npc(fname="Dummy", sname="Girl", is_female=True, isslut=True)
@@ -647,7 +617,7 @@ scripts\core\location_system\location_character_interact.rpy:318: default expand
 scripts\core\location_system\location_character_interact.rpy:342: default expand_button = False
 scripts\core\location_system\location_character_interact.rpy:362: default expand_button = False
 scripts\core\location_system\location_character_interact.rpy:37: default expand_button = False
-scripts\core\location_system\location_character_interact.rpy:6: default expand_button = False # A local variable to check if the expand arrow is pressed or not. doesnt work with $ for some reason
+scripts\core\location_system\location_character_interact.rpy:6: default expand_button = False
 scripts\core\location_system\location_character_interact.rpy:90: default expand_button = False
 scripts\core\people.rpy:1: default hide_peoplescreen = False
 scripts\core\perk_system\perk_class.rpy:379: $ perk_fresh = PerkClass("Fresh start", "My body is brand new and is feeling good. Any activities I do will be a bit easier so I should workout or study as much as I can.", "perk_fresh", confidence_multi=1.2, fitness_multi=1.5, int_multi=2.0)
@@ -720,11 +690,11 @@ scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:21: default tab_
 scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:23: default primary_colour = "black"
 scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:24: default secondary_colour = "black"
 scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:2: define junk_var = 0
-scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:4: default pc_race = 1 # races currently set up using the IC codes. 1white 2tan 3black 4indian 5asian
-scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:5: default npc_race = 1 # This is used for the action scene screens
-scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:6: default npc2_race = 1 # This is used for the action scene screens
-scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:7: default npc_race2 = 1 # This is used for the action scene screens
-scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:8: default npc_race3 = 1 # This is used for the action scene screens
+scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:4: default pc_race = 1
+scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:5: default npc_race = 1
+scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:6: default npc2_race = 1
+scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:7: default npc_race2 = 1
+scripts\core\wardrobe_system\clothing_images\colour_defines.rpy:8: default npc_race3 = 1
 scripts\core\wardrobe_system\clothing_images\images_face.rpy:10: default pc_eye_colour = 0
 scripts\core\wardrobe_system\clothing_images\images_face.rpy:11: default pc_lip_colour = 0
 scripts\core\wardrobe_system\clothing_images\images_face.rpy:4: default pc_drool = 0
@@ -767,7 +737,6 @@ scripts\core\wardrobe_system\item_descriptions.rpy:150: $ item_top_19 = Item("UN
 scripts\core\wardrobe_system\item_descriptions.rpy:152: $ item_top_21 = Item("CHEST RAGS", "Some torn rags that try to give me some modesty.", "item_top_21", type="top", outfit=["daily", "party"], belly=True, pokenips=True, clevage=True, slutty=True, value=5, exposed_nips="pri", locked_always=True)
 scripts\core\wardrobe_system\item_descriptions.rpy:153: $ item_top_22 = Item("SHEER DROP TOP", "A Thin top held loosely by thin shoulder straps and left to hang on the body.", "item_top_22", type="top", outfit=["daily", "party"], belly=True, pokenips=True, clevage=True, slutty=True, value=250, exposed_nips="pri")
 scripts\core\wardrobe_system\item_descriptions.rpy:160: $ item_top_29 = Item("RAGGED T-SHIRT", "A t-shirt that is mostly rags now.", "item_top_29", type="top", pokenips=True, slutty=True, value=5, exposed_nips="pri", locked_always=True)
-scripts\core\wardrobe_system\item_descriptions.rpy:162: # $ item_top_31 = Item("CROPPED HOODIE", "A fairly simple hoodie that has been cropped, leaving te belly and underboob exposed.", "item_top_31", type="top", outfit=["daily", "sport", "home"], clevage=True, belly=True, slutty=True, value=200)
 scripts\core\wardrobe_system\item_descriptions.rpy:163: $ item_top_32 = Item("MESH TOP", "A form fitting top with a mesh window.", "item_top_32", type="top", outfit=["daily", "sport", "party", "home"], clevage=True, belly=True, slutty=True, pokenips=True, value=200)
 scripts\core\wardrobe_system\item_descriptions.rpy:164: $ item_top_33 = Item("STRAPPY TOP", "A short top with cross style shoulder straps.", "item_top_33", type="top", outfit=["daily", "sport", "party", "home"], clevage=True, belly=True, slutty=True, pokenips=True, value=200, exposed_nips="pri")
 scripts\core\wardrobe_system\item_descriptions.rpy:165: $ item_top_34 = Item("BUSTIER TOP", "A strapless bustier top.", "item_top_34", type="top", outfit=["daily", "party", "home"], clevage=True, belly=True, slutty=True, pokenips=True, value=200, exposed_nips="pri")
@@ -826,10 +795,10 @@ scripts\core\wardrobe_system\wardrobe_screen.rpy:598: define clothes_tab_noalt_l
 scripts\core\wardrobe_system\wardrobe_screen.rpy:599: define clothes_tab_all_list = ["c", "school", "school2", "daily", "daily2", "party", "party2", "sport", "sport2", "swim", "swim2", "home", "home2", "work", "shop"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:600: define clothes_list = ["hat", "coat", "jacket", "outfit", "top", "bottom", "bra", "pants", "bsuit", "socks", "gloves", "glasses", "choker", "nipring", "navelring", "mask"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:602: define clothes_wardrobe_list = ["hat", "gloves", "coat", "outfit", "top", "bottom", "socks", "bra", "pants", "bsuit"]
-scripts\core\wardrobe_system\wardrobe_screen.rpy:603: define clothes_wardrobe_tops_list = ["hat", "gloves", "jacket", "coat", "top", "bottom", "outfit"] # TOPS = Not underwear
-scripts\core\wardrobe_system\wardrobe_screen.rpy:604: define clothes_wardrobe_under_list = ["socks", "bra", "pants", "bsuit"] # inder = Underwear
-scripts\core\wardrobe_system\wardrobe_screen.rpy:605: define clothes_wardrobe_upper_list = ["hat", "gloves", "jacket", "coat", "top", "outfit", "bra", "bsuit"] # Upper = Above the waist
-scripts\core\wardrobe_system\wardrobe_screen.rpy:606: define clothes_wardrobe_lower_list = ["bottom", "socks", "pants", "bsuit"] # Upper = Above the waist
+scripts\core\wardrobe_system\wardrobe_screen.rpy:603: define clothes_wardrobe_tops_list = ["hat", "gloves", "jacket", "coat", "top", "bottom", "outfit"]
+scripts\core\wardrobe_system\wardrobe_screen.rpy:604: define clothes_wardrobe_under_list = ["socks", "bra", "pants", "bsuit"]
+scripts\core\wardrobe_system\wardrobe_screen.rpy:605: define clothes_wardrobe_upper_list = ["hat", "gloves", "jacket", "coat", "top", "outfit", "bra", "bsuit"]
+scripts\core\wardrobe_system\wardrobe_screen.rpy:606: define clothes_wardrobe_lower_list = ["bottom", "socks", "pants", "bsuit"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:608: define clothes_acc_list = ["glasses", "mask", "choker", "necklace", "neck", "earring", "nipring", "navelring", "waist", "vag", "anus"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:609: define clothes_acc_perm_list = ["earring", "necklace", "nipring", "navelring", "vag", "anus"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:610: define clothes_acc_temp_list = ["glasses", "mask", "choker", "neck", "waist"]
@@ -847,10 +816,10 @@ scripts\core\wardrobe_system\wardrobe_screen.rpy:624: define eye_colours_custom_
 scripts\core\wardrobe_system\wardrobe_screen.rpy:625: define skin_colours_list = ["1_0_base","2_0_base","3_0_base","4_0_base","5_0_base"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:626: define skin_colours_custom_list = ["6_0_base","7_0_base","8_0_base","9_0_base","10_0_base"]
 scripts\core\wardrobe_system\wardrobe_screen.rpy:628: define wardrobe_restricted = True
-scripts\locations\commercial_area\events\work_clothing_vars.rpy:11: define work_clothing_workdays = 0 # A counter for how many days you have worked here
-scripts\locations\commercial_area\events\work_clothing_vars.rpy:12: define work_clothing_salary = 0 # How much you have earned for the day
-scripts\locations\commercial_area\events\work_clothing_vars.rpy:13: define work_clothing_events_counter = 0 # Count how many events trigger for the working day to guide dialouge
-scripts\locations\commercial_area\events\work_clothing_vars.rpy:14: define work_clothing_naughty_counter = 0 # A counter for how many naughty events you have witnessed. This is to prevent some of the more extreme events triggering very early
+scripts\locations\commercial_area\events\work_clothing_vars.rpy:11: define work_clothing_workdays = 0
+scripts\locations\commercial_area\events\work_clothing_vars.rpy:12: define work_clothing_salary = 0
+scripts\locations\commercial_area\events\work_clothing_vars.rpy:13: define work_clothing_events_counter = 0
+scripts\locations\commercial_area\events\work_clothing_vars.rpy:14: define work_clothing_naughty_counter = 0
 scripts\locations\commercial_area\events\work_clothing_vars.rpy:16: define work_clothing_fasion_quest = 0
 scripts\locations\commercial_area\events\work_clothing_vars.rpy:20: define work_clothing_var_spring = 0
 scripts\locations\commercial_area\events\work_clothing_vars.rpy:21: define work_clothing_var_summer = 0
@@ -869,8 +838,8 @@ scripts\locations\commercial_area\events\work_clothing_vars.rpy:9: define clo_cu
 scripts\locations\commercial_area\events\work_fliers.rpy:1: define work_fliers_var_clothing = False
 scripts\locations\commercial_area\events\work_fliers.rpy:2: define work_fliers_var_market = False
 scripts\locations\commercial_area\events\work_fliers.rpy:3: define work_fliers_var_fliers = False
-scripts\locations\commercial_area\events\work_fliers.rpy:6: define work_fliers_events_counter = 0 # Count how many events trigger for the working day to guide dialouge
-scripts\locations\commercial_area\events\work_fliers.rpy:7: define work_fliers_naughty_counter = 0 # A counter for how many naughty events you have witnessed. This is to prevent some of the more extreme events triggering very early
+scripts\locations\commercial_area\events\work_fliers.rpy:6: define work_fliers_events_counter = 0
+scripts\locations\commercial_area\events\work_fliers.rpy:7: define work_fliers_naughty_counter = 0
 scripts\locations\general\action_clean\action_clean_functions.rpy:81: define clean_locations = []
 scripts\locations\general\action_clean\action_clean_picker.rpy:175: $ player.add_money(quest_cleaner.reward)
 scripts\locations\general\action_clean\action_clean_picker.rpy:196: $ player.add_money(quest_cleaner.reward)
@@ -892,18 +861,7 @@ scripts\locations\general\random_events\random_event_picker.rpy:108: default ran
 scripts\locations\general\random_events\random_event_picker.rpy:109: default random_event_picker_location = ""
 scripts\locations\general\random_events\random_event_picker.rpy:110: default random_event_picker_explanation_devnote = False
 scripts\locations\haven\events\endings\haven_ending_wrapup.rpy:483: $ player.add_money((main_quest_05.reward * (t.day - main_quest_05.dict["day_entrance"])) + main_quest_05.reward_counter + 4000)
-scripts\locations\haven\events\endings\haven_ending_wrapup.rpy:486: # $ player.cash += main_quest_05.reward * (t.day - main_quest_05.dict["day_entrance"]) # You get paid 1000 money for every day you were in haven
-scripts\locations\haven\events\endings\haven_ending_wrapup.rpy:487: # $ player.cash += main_quest_05.reward_counter # This is the money that you left behind when you went on the mission
 scripts\locations\haven\events\endings\haven_sold_ending.rpy:2169: $ player.add_money((main_quest_05.reward * 15) + main_quest_05.reward_counter)
-scripts\locations\haven\events\endings\haven_sold_ending.rpy:2277: $ rent_pay(rent_total_owed(), cash=False, notif=False) # Rent was paid by the institute while you were away
-scripts\locations\haven\events\prep_vars.rpy:10: #     define havgirl = Character('Haven girl', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:2: #     define hav = Character('Haven resident', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:3: #     define havguard = Character('Haven guard', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:4: #     define havguard1 = Character('Haven guard 1', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:5: #     define havguard2 = Character('Haven guard 2', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:6: #     define havguard3 = Character('Haven guard 3', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:8: #     define havmuff = Character('Muffled voice', color="#ffffff")
-scripts\locations\haven\events\prep_vars.rpy:9: #     define havwhore = Character('Haven whore', color="#ffffff")
 scripts\locations\home\events\bedroom_sleep.rpy:1: default sleep_oversleep = False
 scripts\locations\home\events\bedroom_sleep.rpy:2: default sleep_gavebirth = False
 scripts\locations\home\kitchen.rpy:35: $ player.remove_money(20)
@@ -938,14 +896,13 @@ scripts\locations\pub\pub_events\pub_work\pub_work_cyclers.rpy:285: $ player.add
 scripts\locations\pub\pub_events\pub_work\pub_work_cyclers.rpy:286: $ player.add_money(pub_waitress.missionvar3)
 scripts\locations\pub\pub_events\pub_work\pub_work_cyclers.rpy:2: define pub_work_hours = (17,18,19,20,21,22,23,0,1,2)
 scripts\locations\pub\pub_events\pub_work\pub_work_rep_lap.rpy:162: $ player.add_money(player.soldprice)
-scripts\locations\pub\pub_events\pub_work\pub_work_rep_talk.rpy:184: #     $ show_notif_popup("Drunk and horny")
 scripts\locations\school\school_action_scenes\school_rep_sex.rpy:110: $ player.add_money(player.soldprice)
 scripts\locations\school\school_action_scenes\school_rep_sex.rpy:393: $ player.add_money(player.soldprice)
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:14: define feminism = Character('Women\'s Studies', color="#ffffff")
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:15: define econ = Character('Economics', color="#ffffff")
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:16: define history = Character('Plague History', color="#ffffff")
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:17: define geog = Character('[town] Geography', color="#ffffff")
-scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:19: default school_plague_history = 0 # These vars will tick up after every class so the next one can be triggered
+scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:19: default school_plague_history = 0
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:20: default school_women_history = 0
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:21: default school_econ_history = 0
 scripts\locations\school\school_classes\school_class_morning\school_class_morning_picker.rpy:22: default school_geography = 0
@@ -962,7 +919,6 @@ scripts\locations\school\school_events\school_dance\school_dance_shows\dance_par
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_event_poledance.rpy:126: $ player.add_money(numgen(2,15))
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_event_poledance.rpy:84: $ player.add_money(player.soldprice)
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_event_poledance.rpy:99: $ player.add_money(player.soldprice)
-scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_event_sex.rpy:251: $ player.sex_man_amount = 1 # yes, 1 is correct, the guy in her mouth has already been counted
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_random_events\dance_party_random_event_general.rpy:108: $ player.add_money(player.soldprice)
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_random_events\dance_party_random_event_general.rpy:131: $ player.add_money(player.soldprice)
 scripts\locations\school\school_events\school_dance\school_dance_shows\dance_party\dance_party_start.rpy:31: $ player.add_money(500)
@@ -978,7 +934,7 @@ scripts\locations\school\school_events\school_dance\school_dance_shows\school_da
 scripts\locations\school\school_events\school_dance\school_dance_shows\school_dance_show_8.rpy:228: $ player.add_money(65)
 scripts\locations\school\school_events\school_dance\school_dance_shows\school_dance_show_9.rpy:206: $ player.add_money(60)
 scripts\locations\school\school_events\school_dance\school_dance_shows\school_dance_show_9.rpy:216: $ player.add_money(65)
-scripts\locations\school\school_events\school_newfriend\school_newfriend_intro.rpy:1: define replace = Character('New friend', color="#ffffff") # Short name for the character
+scripts\locations\school\school_events\school_newfriend\school_newfriend_intro.rpy:1: define replace = Character('New friend', color="#ffffff")
 scripts\locations\school\school_events\school_newfriend\school_newfriend_intro.rpy:3: define school_newfriend_quest_reject_drink = 0
 scripts\locations\school\school_events\school_newfriend\school_newfriend_intro.rpy:4: define school_newfriend_quest_blackmail_material = False
 scripts\locations\school\school_events\school_newfriend\school_newfriend_intro.rpy:5: define school_newfriend_quest_blackmailing = False
@@ -996,7 +952,6 @@ scripts\locations\school\school_events\school_photo\school_photo_functions.rpy:2
 scripts\locations\school\school_events\school_photo\school_photo_intro.rpy:193: $ player.add_money(25)
 scripts\locations\school\school_events\school_photo\school_photo_intro.rpy:280: $ player.add_money(25)
 scripts\locations\school\school_events\school_photo\school_photo_intro.rpy:308: $ add_to_list(quest_photo_intro.conversation_topics, "intro_reason_slut")
-scripts\locations\school\school_events\school_photo\school_photo_intro.rpy:350: #$ remove_from_list(quest_photo_intro.conversation_topics,["intro_reason_smile","intro_reason_slut","intro_reason_sex"])
 scripts\locations\school\school_events\school_soccer\school_soccer.rpy:11: default school_soccer_quest_backentrance = {
 scripts\locations\school\school_events\school_soccer\school_soccer.rpy:16: default school_soccer_quest_boys_know = {
 scripts\locations\school\school_events\school_soccer\school_soccer.rpy:1: default school_soccer_quest_games_won = 0
@@ -1028,7 +983,6 @@ scripts\origins\01_start_hospital_wake.rpy:182: $ fname = "Samantha"
 scripts\origins\01_start_hospital_wake.rpy:6: define origin_start_tutorial = False
 scripts\origins\03_start_home.rpy:659: $ log.assign("Introduction to The Institute")
 scripts\origins\03_start_home.rpy:660: $ player.add_money(200)
-scripts\origins\homeless\01_homeless_start.rpy:176: $ block_walk_music = False # Re enable correct music
 scripts\origins\homeless\01_homeless_start.rpy:414: $ log.assign("Introduction to The Institute")
 scripts\origins\homeless\01_homeless_start.rpy:59: $ player._confidence = (numgen(22,30))
 teststore.rpy:18: $ player.corrupt += 50
