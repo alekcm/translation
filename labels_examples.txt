@@ -1,0 +1,1070 @@
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_recap ===
+label main_quest_recap:
+    if main_quest_01.active == 1:
+        jump main_quest_01_recap
+    elif main_quest_02.active == 1:
+        jump main_quest_02_recap
+    elif main_quest_03.active == 1:
+        jump main_quest_03_recap
+    elif main_quest_04.active == 1:
+        jump main_quest_04_recap
+    elif main_quest_05.active == 1:
+        jump main_quest_05_recap
+    else:
+        jump main_quest_endofcontent
+
+
+
+
+label main_quest_none_recap:
+    tucker.name "This should never trigger and is just a failsafe. Report it as a bug."
+    jump tucker_generic_cont
+
+label main_quest_01_recap:
+    tucker.name "Go to the pub in the evening and speak to Simon Banks. Find out why he is trying to squeeze our staff for info."
+    tucker.name "Come and see me after you have spoken to him and tell me how it went. Remember, the goal is just to give you practice so don't worry about not finding out what his aims are."
+    jump tucker_generic_cont
+
+
+label main_quest_02_recap:
+    if main_quest_02.stage == 2:
+        tucker.name "In the evening, go to the pub you met [simon.name] in before and leave a white chalk mark on the door signalling you are ready to meet."
+        tucker.name "Then head to the highway and collect the package off him. I'll leave the methods up to you."
+        jump tucker_generic_cont
+    elif main_quest_02.stage == 1:
+        tucker.name "First you need you to meet with [nik.name] and have your appearance altered before your meeting with [simon.fullname]."
+        tucker.name "We need you need to pretend to be a woman named [nadianame] to be able to receive the package we want off of [simon.name]."
+        tucker.name "Shall we go pay a visit to [nik.name] now?"
+        menu:
+            "Yes, I am ready for the mission":
+                jump main_quest_02_transform
+            "No, I will come back later":
+                tucker.name "Ok, I will be here when you need me."
+                jump tucker_generic_cont
+    elif main_quest_02.stage == 0:
+        tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
+        jump tucker_generic_cont
+    elif main_quest_01.missionvar1 == True: # passed the first mission
+        "The last mission was complete so come back tomorrow and I will have some info for you"
+        jump tucker_generic_cont
+
+    else:
+        jump main_quest_none_recap
+
+label main_quest_03_recap:
+    tucker.name "Go home and think over what we spoke about. Come and speak to me after if you still want to work with us."
+    jump tucker_generic_cont
+
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_none_recap ===
+label main_quest_none_recap:
+    tucker.name "This should never trigger and is just a failsafe. Report it as a bug."
+    jump tucker_generic_cont
+
+label main_quest_01_recap:
+    tucker.name "Go to the pub in the evening and speak to Simon Banks. Find out why he is trying to squeeze our staff for info."
+    tucker.name "Come and see me after you have spoken to him and tell me how it went. Remember, the goal is just to give you practice so don't worry about not finding out what his aims are."
+    jump tucker_generic_cont
+
+
+label main_quest_02_recap:
+    if main_quest_02.stage == 2:
+        tucker.name "In the evening, go to the pub you met [simon.name] in before and leave a white chalk mark on the door signalling you are ready to meet."
+        tucker.name "Then head to the highway and collect the package off him. I'll leave the methods up to you."
+        jump tucker_generic_cont
+    elif main_quest_02.stage == 1:
+        tucker.name "First you need you to meet with [nik.name] and have your appearance altered before your meeting with [simon.fullname]."
+        tucker.name "We need you need to pretend to be a woman named [nadianame] to be able to receive the package we want off of [simon.name]."
+        tucker.name "Shall we go pay a visit to [nik.name] now?"
+        menu:
+            "Yes, I am ready for the mission":
+                jump main_quest_02_transform
+            "No, I will come back later":
+                tucker.name "Ok, I will be here when you need me."
+                jump tucker_generic_cont
+    elif main_quest_02.stage == 0:
+        tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
+        jump tucker_generic_cont
+    elif main_quest_01.missionvar1 == True: # passed the first mission
+        "The last mission was complete so come back tomorrow and I will have some info for you"
+        jump tucker_generic_cont
+
+    else:
+        jump main_quest_none_recap
+
+label main_quest_03_recap:
+    tucker.name "Go home and think over what we spoke about. Come and speak to me after if you still want to work with us."
+    jump tucker_generic_cont
+
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_01_recap ===
+label main_quest_01_recap:
+    tucker.name "Go to the pub in the evening and speak to Simon Banks. Find out why he is trying to squeeze our staff for info."
+    tucker.name "Come and see me after you have spoken to him and tell me how it went. Remember, the goal is just to give you practice so don't worry about not finding out what his aims are."
+    jump tucker_generic_cont
+
+
+label main_quest_02_recap:
+    if main_quest_02.stage == 2:
+        tucker.name "In the evening, go to the pub you met [simon.name] in before and leave a white chalk mark on the door signalling you are ready to meet."
+        tucker.name "Then head to the highway and collect the package off him. I'll leave the methods up to you."
+        jump tucker_generic_cont
+    elif main_quest_02.stage == 1:
+        tucker.name "First you need you to meet with [nik.name] and have your appearance altered before your meeting with [simon.fullname]."
+        tucker.name "We need you need to pretend to be a woman named [nadianame] to be able to receive the package we want off of [simon.name]."
+        tucker.name "Shall we go pay a visit to [nik.name] now?"
+        menu:
+            "Yes, I am ready for the mission":
+                jump main_quest_02_transform
+            "No, I will come back later":
+                tucker.name "Ok, I will be here when you need me."
+                jump tucker_generic_cont
+    elif main_quest_02.stage == 0:
+        tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
+        jump tucker_generic_cont
+    elif main_quest_01.missionvar1 == True: # passed the first mission
+        "The last mission was complete so come back tomorrow and I will have some info for you"
+        jump tucker_generic_cont
+
+    else:
+        jump main_quest_none_recap
+
+label main_quest_03_recap:
+    tucker.name "Go home and think over what we spoke about. Come and speak to me after if you still want to work with us."
+    jump tucker_generic_cont
+
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_02_recap ===
+label main_quest_02_recap:
+    if main_quest_02.stage == 2:
+        tucker.name "In the evening, go to the pub you met [simon.name] in before and leave a white chalk mark on the door signalling you are ready to meet."
+        tucker.name "Then head to the highway and collect the package off him. I'll leave the methods up to you."
+        jump tucker_generic_cont
+    elif main_quest_02.stage == 1:
+        tucker.name "First you need you to meet with [nik.name] and have your appearance altered before your meeting with [simon.fullname]."
+        tucker.name "We need you need to pretend to be a woman named [nadianame] to be able to receive the package we want off of [simon.name]."
+        tucker.name "Shall we go pay a visit to [nik.name] now?"
+        menu:
+            "Yes, I am ready for the mission":
+                jump main_quest_02_transform
+            "No, I will come back later":
+                tucker.name "Ok, I will be here when you need me."
+                jump tucker_generic_cont
+    elif main_quest_02.stage == 0:
+        tucker.name "We are still monitoring the reporter and waiting for him to make a move. I will keep you updated if anything changes"
+        jump tucker_generic_cont
+    elif main_quest_01.missionvar1 == True: # passed the first mission
+        "The last mission was complete so come back tomorrow and I will have some info for you"
+        jump tucker_generic_cont
+
+    else:
+        jump main_quest_none_recap
+
+label main_quest_03_recap:
+    tucker.name "Go home and think over what we spoke about. Come and speak to me after if you still want to work with us."
+    jump tucker_generic_cont
+
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_03_recap ===
+label main_quest_03_recap:
+    tucker.name "Go home and think over what we spoke about. Come and speak to me after if you still want to work with us."
+    jump tucker_generic_cont
+
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_04_recap ===
+label main_quest_04_recap:
+    tucker.name "Go to the highway checkpoint and speak with [miller.name]. He will have more details when you get there."
+    $ unlocked_police = True
+    jump tucker_generic_cont
+
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_05_recap ===
+label main_quest_05_recap:
+    if log.interactive("mq_04_e"):
+        tucker.name "Give us some time to recon [haven] and come up with a plan on how to get you inside. Come back in a few days."
+        jump tucker_generic_cont
+
+    if log.interactive("mq_05_a"):
+        if player.pregnancy > 1 or player.preg_knows:
+            tucker.name "We are preparing to send you into [haven] to look for [ant.name] but we can't do that while you are pregnant."
+            jump tucker_generic_cont
+        elif player.fitness < 20 or player.pregnancy > 0:
+            tucker.name "We need you to get in better shape before we can send you into [haven]. So work out a bit and lose that belly then come and speak to me to start things off."
+            jump tucker_generic_cont
+        else:
+            tucker.name "We are waiting on you to give the go ahead before we prepare you to go into [haven]. Are you ready now?"
+            menu:
+                "Yes, let's get started":
+                    $ log.markdone("mq_05_a")
+                    jump main_quest_05_preperation
+                "Not yet.":
+                    tucker.name "Ok, well you know where I am."
+                    jump tucker_generic_cont
+
+
+
+
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_recap.rpy: label main_quest_endofcontent ===
+label main_quest_endofcontent:
+    tucker.name "You have reached the end of content for The Institute missions for now."
+    jump tucker_generic_cont
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_a_briefing.rpy: label main_quest_01_briefing ===
+label main_quest_01_briefing:
+
+    $ main_quest_01.activate()
+    $ diary_main_quest_01 = Diary_Class("My first mission", "I finally bit the bullet and visited The Institute today and had a chat with [tucker.name].\nHe gave me a rough idea of what they expect of me. Or I guess hope they can get from me.\nI have been asked to go to the pub and get some information off of someone who is poking their nose in their business.\nOr something...\nNot entirely sure what is going on, But I suppose I should go and see what I can do.")
+    $ walk(loc_hospital_office)
+    show tucker smile at right1 with dissolve
+    if t.day == 0:
+        tucker.name "Hello Miss [sname]. You came here a lot quicker than I expected. I thought you would have wanted more time to adjust to your situation."
+    elif t.day <= 7:
+        tucker.name "It's good to see you again Miss [sname]. I hope you have been adjusting well."
+    elif t.day > 15:
+        tucker.name "Hello Miss [sname]. It's been a while. I was starting to think you might not come to visit me. I hope you have been adjusting well."
+    else:
+        tucker.name "It's good to see you again Miss [sname]. How has returning to school been? I hope you are adjusting well."
+
+    if name == fname:
+        pc "It's [name], and it's a lot easier to adjust when you have all the info on what's going on."
+    else:
+        pc "It's [fname]. Or better yet, [name]. And it's a lot easier to adjust when you have all the info on what's going on."
+    tucker.name "Well, I won't argue with you there. But there is nothing to stress about."
+    $ player.face_frown()
+    pc "Hmmm, the world has gone in the toilet so I think I will keep some scepticism."
+    tucker.name "Mmm, rightly so. But I will at least promise you we have nothing sinister planned for you. We just need someone we can rely on. And that's where you come in."
+    pc "What makes you think you can rely on me?"
+    if quest_homeless_start.active:
+        tucker.name "Coming into [town] with only the clothes on your back and still managing to get through it all paints you in a good light."
+        pc "Pretty sure half the whores in the slum can say the same thing."
+        tucker.name "Maybe, but none of them has [emile.name] to vouch for them."
+        pc "Ah, so a bit of nepotism then."
+        tucker.name "Call it what you will. Are you ready to do something for us? Your first mission so to speak."
+    else:
+        tucker.name "Well, as I explained before. With your situation it would be highly destructive to yourself if you were to divulge anything that goes on here."
+        $ player.face_suspicious() 
+        pc "Chopped up on a lab table for the secrets of a new body? Why is this not something you want for me?"
+        $ player.face_frown()
+        tucker.name "Well why would we need to? We already have the secrets. What we need now is data. Are there side effects? How do you mentally recover? That sort of thing."
+        tucker.name "Using you to complete sensitive tasks for us is just an added benefit. And on that topic, are you ready to do something for us? Your first mission so to speak."
+    pc "Well, I can certainly listen."
+    tucker.name "Good enough. Well ok..."
+    tucker.name "We have had reports of someone trying to get info from our staff members. We aren't entirely sure what his goals are or what he might know about us. So we want you to find out."
+    tucker.name "His name is [simon.fullname] and is a self-proclaimed reporter. Here is a photo of him."
+    $ player.face_surprised()
+    pc "A reporter?"
+    tucker.name "Emphasis on the \"Self-proclaimed\". You might not be aware but news these days is highly curated. Propaganda basically. So actual reporters no longer exist."
+    tucker.name "Most likely he is someone aiming to find something he can use to blackmail The Institute or its staff. We can't let that happen. But how we deal with him depends on what he knows."
+    $ player.face_shock()
+    pc "Deal with him? Like kill him."
+    tucker.name "No, that would bring even more attention if we did something so rash. No, we would use much more tactful methods."
+    $ player.face_frown()
+    pc "Should I ask what methods?"
+    tucker.name "Depends on the situation. Anything from just giving the info if it's mundane enough, to bribery or threats."
+    pc "Ok..."
+    tucker.name "Unfortunately against people who want to bring us harm, there is often little choice."
+    pc "And what makes you think I am capable of getting the info you want from him?"
+    tucker.name "We don't think you are capable. This is a task that we do not expect you to succeed. Our aim is to see how you deal with such work. Basically, to allow you to practice in a safe environment."
+    pc "You expect me to fail? Won't that cause you trouble?"
+    tucker.name "Probably not. The so-called reporter probably hasn't got a clue about anything that goes on here."
+    pc "That makes the two of us..."
+    tucker.name "Heh, in time you will find out more. Ordinarily we would just ignore him. But he makes a good target for you to practice on."
+    pc "And if I refuse?"
+    if quest_homeless_start.active:
+        tucker.name "Then nothing. You go home and I find someone else to do the work I need."
+        tucker.name "But being that you have no history in [town], no loyalties or ties. You make a good candidate."
+    else:
+        tucker.name "Nothing. I will reiterate my promise that we have nothing sinister planned for you. Our goal with you is just research data and having you perform tasks is just a bonus we hope will both bear fruit and aid in your recovery."
+    tucker.name "And for a little motivation, the pay is probably better than anything else you would be capable of earning."
+    pc "Ok, so what do you want from me?"
+    tucker.name "The so-called reporter, [simon.fullname], is in the pub almost every night in the hope of eavesdropping on conversations from Institute staff members."
+    tucker.name "We want you to somehow find out what he knows or what his aims are. Strike up a conversation with him and try and get the info."
+    pc "Not break into his flat or pickpocket him or something?"
+    tucker.name "Are you even capable of either of those?"
+    tucker.name "No, as I mentioned before, we expect you to fail. You have zero training in such things so to expect anything else is unreasonable." 
+    tucker.name "The real goal is to spook him. This will either scare him away or have him lead us to any co-conspirators."
+    tucker.name "The final result really doesn't matter. Getting you on board and getting practice is our ultimate goal. So give it a go with no pressure."
+    pc "Speak to the reporter, [simon.fullname], in the pub and find out what he knows? Ok. I will think about it."
+    tucker.name "No problem. Think it over and come and see me once you have made your choice."
+    $ player.face_normal()
+    $ main_quest_01.stage = 1
+    $ log.markdone("mq_01_a")
+    jump tucker_generic_cont  
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter1 ===
+label main_quest_01_reporter1:
+    if not t.hour in (18,19,20,21,22,23,0,1,2,3):
+        if t.hour < 18:
+            pcm "I don't see [simon.fullname] anywhere. It's probably too early for him to be here."
+        elif t.hour > 3:
+            pcm "I don't see [simon.fullname] anywhere. It's probably too late and he went home."
+        jump travel
+    else:
+        pcm "Hmm, [simon.fullname] is probably around here somewhere. Should I look for him?"
+        menu:
+            "Yes, look around for him.":
+                jump main_quest_01_reporter_start
+
+            "Not right now.":
+                jump travel
+
+label main_quest_01_reporter_start_cheat:
+    "Resetting mission variables. Make sure to make a new save because this cheat may break the main mission if you have already passed this point in The Institute chain."
+    $ main_quest_01 = QuestClass()
+    $ simon = Npc(fname="Simon", sname="Banks") # Reporter npc from the first main quest
+    $ bob = Npc(fname="Bob", sname="Cray") # Target for the reporter mission
+    jump main_quest_01_reporter_start
+
+#################################
+### START LABELS
+#################################
+
+label main_quest_01_reporter_start:
+    $ player.face_neutral()
+    pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
+    pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
+    menu:
+        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+            $ add_to_list(main_quest_01.list, "sex_branch")
+            jump main_quest_01_reporter_sex_branch
+
+        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
+            $ add_to_list(main_quest_01.list, "intimidate_branch")
+            jump main_quest_01_reporter_intimidate_branch
+
+        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
+            $ add_to_list(main_quest_01.list, "talk_branch")
+            pc "I guess a more direct approach could work."
+            show simon at right1 with dissolve
+            pc "Hey, this seat taken?"
+            simon.name "Hmm. Took longer than I expected."
+            pc "Huh?"
+            simon.name "Sent by The Institute?"
+            jump main_quest_01_reporter_intro_busted
+
+        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
+            $ add_to_list(main_quest_01.list, "waitress_branch")
+            jump main_quest_01_reporter_bargirl_branch
+
+        "Sit near him and take it from there I suppose":
+            $ add_to_list(main_quest_01.list, "wait_branch")
+            jump main_quest_01_reporter_intro_drink
+
+        "I'll think about it and come back another day":
+            pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
+            $ walk(loc_revel)
+            jump travel
+
+#################################
+### SEX BRANCH LABELS
+#################################
+
+label main_quest_01_reporter_sex_branch:
+    pcm "Time to put it to work I suppose..."
+    show simon at right1 with dissolve
+    pc "Hey, interested in some company?"
+    simon.name "Hmm. Took longer than I expected."
+    pc "Expecting me?"
+    simon.name "Sent by The Institute? Just didn't think they would send someone... quite like you."
+    if "school" in tab_top:
+        pc "I hear guys like a girl in a school uniform."
+        simon.name "Won't disagree there."
+    elif player.allure > 100:
+        pc "Like what you see?"
+        simon.name "Err, that I do."
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_start_cheat ===
+label main_quest_01_reporter_start_cheat:
+    "Resetting mission variables. Make sure to make a new save because this cheat may break the main mission if you have already passed this point in The Institute chain."
+    $ main_quest_01 = QuestClass()
+    $ simon = Npc(fname="Simon", sname="Banks") # Reporter npc from the first main quest
+    $ bob = Npc(fname="Bob", sname="Cray") # Target for the reporter mission
+    jump main_quest_01_reporter_start
+
+#################################
+### START LABELS
+#################################
+
+label main_quest_01_reporter_start:
+    $ player.face_neutral()
+    pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
+    pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
+    menu:
+        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+            $ add_to_list(main_quest_01.list, "sex_branch")
+            jump main_quest_01_reporter_sex_branch
+
+        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
+            $ add_to_list(main_quest_01.list, "intimidate_branch")
+            jump main_quest_01_reporter_intimidate_branch
+
+        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
+            $ add_to_list(main_quest_01.list, "talk_branch")
+            pc "I guess a more direct approach could work."
+            show simon at right1 with dissolve
+            pc "Hey, this seat taken?"
+            simon.name "Hmm. Took longer than I expected."
+            pc "Huh?"
+            simon.name "Sent by The Institute?"
+            jump main_quest_01_reporter_intro_busted
+
+        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
+            $ add_to_list(main_quest_01.list, "waitress_branch")
+            jump main_quest_01_reporter_bargirl_branch
+
+        "Sit near him and take it from there I suppose":
+            $ add_to_list(main_quest_01.list, "wait_branch")
+            jump main_quest_01_reporter_intro_drink
+
+        "I'll think about it and come back another day":
+            pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
+            $ walk(loc_revel)
+            jump travel
+
+#################################
+### SEX BRANCH LABELS
+#################################
+
+label main_quest_01_reporter_sex_branch:
+    pcm "Time to put it to work I suppose..."
+    show simon at right1 with dissolve
+    pc "Hey, interested in some company?"
+    simon.name "Hmm. Took longer than I expected."
+    pc "Expecting me?"
+    simon.name "Sent by The Institute? Just didn't think they would send someone... quite like you."
+    if "school" in tab_top:
+        pc "I hear guys like a girl in a school uniform."
+        simon.name "Won't disagree there."
+    elif player.allure > 100:
+        pc "Like what you see?"
+        simon.name "Err, that I do."
+    else:
+        pc "Oh? Hoping for some burly guy to come chat with you?"
+        simon.name "Not quite."
+    pc "So, since you know why I am here, we can drop the pretence. I want to know why you are poking your nose in Institute business."
+    simon.name "Well, that's info I have and you want. Not going to just give up my only leverage."
+    pc "Everyone has a price."
+    if c.braless and c.clevage:
+        simon.name "That why you came over bouncing those tits around?"
+        pc "They tend to do that on their own."
+        simon.name "Yeah, a bra would normally stop that. But I see you decided to go without."
+        pc "Well, wouldn't look so nice with this top."
+    elif c.pokenips and (outside or player.desire > 70):
+        simon.name "That why you came over with those things ready to take someone's eye out?"
+        pc "It's a bit chilli in here and they do what they want."
+        simon.name "Right. And not wearing a bra?"
+        pc "I like them to be free."
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_start ===
+label main_quest_01_reporter_start:
+    $ player.face_neutral()
+    pcm "So this [simon.name] should be around here somewhere now that it's evening. I wonder if I can find him among all these people?"
+    pcm "Ah! I see him over there near the bar. Hmmm. Now I wonder how I should approach him?"
+    menu:
+        "They didn't give me this sexpot body for nothing" (badge="heart_5", enabled=player.check_sex_agree(3, notif=False) and not player.isfat):
+            $ add_to_list(main_quest_01.list, "sex_branch")
+            jump main_quest_01_reporter_sex_branch
+
+        "I could try and intimidate him" (badge="int_5", enabled=player.check_speech(4, notif=False)):
+            $ add_to_list(main_quest_01.list, "intimidate_branch")
+            jump main_quest_01_reporter_intimidate_branch
+
+        "Just chatting with him should do the trick" (badge="conf_5", enabled=not player.check_nowill(notif=False, block_face=True)):
+            $ add_to_list(main_quest_01.list, "talk_branch")
+            pc "I guess a more direct approach could work."
+            show simon at right1 with dissolve
+            pc "Hey, this seat taken?"
+            simon.name "Hmm. Took longer than I expected."
+            pc "Huh?"
+            simon.name "Sent by The Institute?"
+            jump main_quest_01_reporter_intro_busted
+
+        "Dress in my bar clothes and try and get close to him" (badge="allure_6",enabled=pub_waitress.timesworked > 4):
+            $ add_to_list(main_quest_01.list, "waitress_branch")
+            jump main_quest_01_reporter_bargirl_branch
+
+        "Sit near him and take it from there I suppose":
+            $ add_to_list(main_quest_01.list, "wait_branch")
+            jump main_quest_01_reporter_intro_drink
+
+        "I'll think about it and come back another day":
+            pc "He isn't going anywhere. I'll have a think about what to do before wasting my only chance to get close to him."
+            $ walk(loc_revel)
+            jump travel
+
+#################################
+### SEX BRANCH LABELS
+#################################
+
+label main_quest_01_reporter_sex_branch:
+    pcm "Time to put it to work I suppose..."
+    show simon at right1 with dissolve
+    pc "Hey, interested in some company?"
+    simon.name "Hmm. Took longer than I expected."
+    pc "Expecting me?"
+    simon.name "Sent by The Institute? Just didn't think they would send someone... quite like you."
+    if "school" in tab_top:
+        pc "I hear guys like a girl in a school uniform."
+        simon.name "Won't disagree there."
+    elif player.allure > 100:
+        pc "Like what you see?"
+        simon.name "Err, that I do."
+    else:
+        pc "Oh? Hoping for some burly guy to come chat with you?"
+        simon.name "Not quite."
+    pc "So, since you know why I am here, we can drop the pretence. I want to know why you are poking your nose in Institute business."
+    simon.name "Well, that's info I have and you want. Not going to just give up my only leverage."
+    pc "Everyone has a price."
+    if c.braless and c.clevage:
+        simon.name "That why you came over bouncing those tits around?"
+        pc "They tend to do that on their own."
+        simon.name "Yeah, a bra would normally stop that. But I see you decided to go without."
+        pc "Well, wouldn't look so nice with this top."
+    elif c.pokenips and (outside or player.desire > 70):
+        simon.name "That why you came over with those things ready to take someone's eye out?"
+        pc "It's a bit chilli in here and they do what they want."
+        simon.name "Right. And not wearing a bra?"
+        pc "I like them to be free."
+    elif c.slutty:
+        simon.name "That why you came over here showing off all that skin?"
+        if t.month in ("Spring","Summer"):
+            pc "Nice weather out there so I am enjoying it."
+            simon.name "Yeah, but bet you like the attention as well."
+            pc "Even if I wore a burlap sack, the perverts out there would still look."
+        else:
+            pc "Err, the weather is nice?"
+            simon.name "Hah!"
+    elif player.allure > 100:
+        simon.name "That why you came over here looking like that?"
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_sex_branch ===
+label main_quest_01_reporter_sex_branch:
+    pcm "Time to put it to work I suppose..."
+    show simon at right1 with dissolve
+    pc "Hey, interested in some company?"
+    simon.name "Hmm. Took longer than I expected."
+    pc "Expecting me?"
+    simon.name "Sent by The Institute? Just didn't think they would send someone... quite like you."
+    if "school" in tab_top:
+        pc "I hear guys like a girl in a school uniform."
+        simon.name "Won't disagree there."
+    elif player.allure > 100:
+        pc "Like what you see?"
+        simon.name "Err, that I do."
+    else:
+        pc "Oh? Hoping for some burly guy to come chat with you?"
+        simon.name "Not quite."
+    pc "So, since you know why I am here, we can drop the pretence. I want to know why you are poking your nose in Institute business."
+    simon.name "Well, that's info I have and you want. Not going to just give up my only leverage."
+    pc "Everyone has a price."
+    if c.braless and c.clevage:
+        simon.name "That why you came over bouncing those tits around?"
+        pc "They tend to do that on their own."
+        simon.name "Yeah, a bra would normally stop that. But I see you decided to go without."
+        pc "Well, wouldn't look so nice with this top."
+    elif c.pokenips and (outside or player.desire > 70):
+        simon.name "That why you came over with those things ready to take someone's eye out?"
+        pc "It's a bit chilli in here and they do what they want."
+        simon.name "Right. And not wearing a bra?"
+        pc "I like them to be free."
+    elif c.slutty:
+        simon.name "That why you came over here showing off all that skin?"
+        if t.month in ("Spring","Summer"):
+            pc "Nice weather out there so I am enjoying it."
+            simon.name "Yeah, but bet you like the attention as well."
+            pc "Even if I wore a burlap sack, the perverts out there would still look."
+        else:
+            pc "Err, the weather is nice?"
+            simon.name "Hah!"
+    elif player.allure > 100:
+        simon.name "That why you came over here looking like that?"
+        pc "Like what? I like dressing like this."
+        simon.name "Or like the attention it brings?"
+        pc "Even if I wore a burlap sack, the perverts out there would still look."
+    elif "school" in tab_top:
+        simon.name "That why you came over here in a uniform?"
+        pc "Well, I have a day life as well."
+        simon.name "Yeah right. The Institute sending a schoolgirl to do their dirty work."
+        pc "Yup."
+    else:
+        simon.name "If that's the game you are playing, would have expected you to look more the part."
+        pc "Looking like that gets unwanted attention."
+    pc "So anyway, wanna tell me what you are up to?"
+    simon.name "Why should I?"
+    pc "Because I am much sweeter than anyone who will come after me. I can be nice. No point in making trouble where there doesn't need to be."
+    simon.name "And what do I get out of it?"
+    pc "Well, depends on what you know and what you want."
+    simon.name "Girl like you obviously knows what a man wants."
+    if player.check_sex_agree_choice(diff=2,option1="Go along with sexual advances" ,option2="Shut him down"):
+
+        pc "Ah, it's like that is it?"
+        if player.allure > 100:
+            simon.name "Of course. Don't act shocked coming over here dressed like that and giving me this cutesy attitude."
+        else:
+            simon.name "Of course. Acting all shocked while giving me this cutesy attitude."
+
+        if player.iswhore or player.isslut:
+            pc "So you want to go somewhere private for the info?"
+            simon.name "Sounds good to me."
+            pc "And how you going to give it to me?"
+            simon.name "Prefer your pussy, but your ass will do."
+            pc "Idiot. I mean the info."
+            simon.name "Oh? I have it all written down in my bag. Pay my price and you can have it all."
+            pcm "Hmm, well easy way to get it I suppose."
+            if player.check_sex_agree_choice(diff=4,option1="Have sex in return for the info" ,option2="Tell him no"):
+                jump main_quest_01_reporter_sex_branch_prepare
+            else:
+                jump main_quest_01_reporter_intro_rejectsex
+                
+        else:
+            pc "So you want me to pay like that for the info?"
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_sex_branch_prepare ===
+label main_quest_01_reporter_sex_branch_prepare:
+    pc "Right, go somewhere private then?"
+    simon.name "Sounds good."
+    pc "Follow me."
+    hide simon with dissolve
+    if pub_waitress.timesworked > 4:
+        $ walk(loc_pub_changingroom)
+        with dissolve
+        pcm "No one here."
+        "I wave at [simon.name] to come in."
+        show simon at right1 with dissolve 
+        simon.name "Err, are we allowed back here?"
+        pc "It's fine. I work here so no one will bother us."
+    else:
+        $ walk(loc_pub_toilet_girls)
+        with dissolve
+        pcm "No one here."
+        "I wave at [simon.name] to come in."
+        show simon at right1 with dissolve 
+        simon.name "Err, you sure?"
+        pc "You see any women in the pub other than me?"
+        simon.name "Not many."
+        pc "So no one will bother us here."
+    simon.name "Right then..."
+    pc "How do I know you are going to give me the info I need?"
+    simon.name "It's all in my bag here. Hold up your end of the bargain and it's yours."
+    pc "In there?"
+    simon.name "Yup. Plus, this is a good deal so no need for me to screw you out of it."
+    pc "Hmmm..."
+    simon.name "But you are looking a bit over dressed for our deal."
+    pcm "Ugh, doesn't look like he is going to slip up and give me what I need unless he gets what he wants."
+    pcm "He did say it was all in his bag. Could steal it..."
+    pcm "No, that could get me in way more trouble than just bending over."
+    pcm "*Sigh* Last chance to back out I guess."
+    if player.check_sex_agree_choice(diff=2, option1="Right, okay then", option2="Err, no. I'm ending this now"):
+        $ add_to_list(main_quest_01.list, "sex_branch_sex")
+        jump main_quest_01_reporter_sex_branch_sex
+
+    else:
+        $ player.face_worried()
+        pc "Sorry, I was hoping you would slip up. But it's gone a bit too far."
+        simon.name "Backing out of it?"
+        pc "Yeah, I am not willing to go that far for whatever you have. I'll leave The Institute to deal with it from here."
+        pc "See you."
+        simon.name "Wait!"
+        pc "Try something and I'll scream."
+        simon.name "*Tsk* I'm not that kind of guy."
+        simon.name "Let's negotiate then. How far are you willing to go?"
+        pc "Huh?"
+        simon.name "Suck my cock?"
+        pc "Oh?"
+        menu:
+            "Ok, I can do that.":
+                $ add_to_list(main_quest_01.list, "sex_branch_blowjob")
+                pc "Guess I could go with that."
+                simon.name "Great!"
+                pc "Err, straight to it then..."
+                $ player.face_surprised()
+                pc "And looks like your friend is already standing to attention."
+                if c.slutty:
+                    simon.name "Dressed like that I think you left half the bar standing up."
+                elif "school" in tab_top:
+                    simon.name "Well, you were right. We do like a girl in a school uniform."
+                elif c.braless and c.clevage:
+                    simon.name "Couldn't take my eyes off those bouncing tits since you walked in."
+                elif c.pokenips and (outside or player.desire > 70):
+                    simon.name "Could say the same with your nipples."   
+                elif player.allure > 100:
+                    simon.name "How can I not be when you are dressed like that."
+                else:
+                    simon.name "Not every day I get a chance with a pretty young thing like you."
+                $ player.face_neutral()
+                pc "*Sigh*"
+                $ pc_strip_upper()
+                pc "Okay then..."
+                pc "Come here."
+                $ npc_race_picker(simon)
+                jump main_quest_01_reporter_game_naked_blowjob
+
+            "No, it's still too much.":
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_sex_branch_sex ===
+label main_quest_01_reporter_sex_branch_sex:
+    $ pc_striptease()
+    simon.name "Damn. I thought you looked good dressed but even better without your clothes."
+    if player.pregnancy == 1:
+        simon.name "That little pouch you have the beginnings of a baby?"
+        if not player.vvirgin:
+            if player.preg_knows:
+                pc "..."
+                pc "A baby..."
+                simon.name "Bet you had fun making that."
+                if player.rapebaby:
+                    pc "Yeah sure. Knocked up while being raped is always fun."
+                    simon.name "Oh? Sorry..."
+                elif player.virginbaby:
+                    pc "Great time. Lost my virginity and got a baby all at the same time."
+                    simon.name "Ah wow. What luck."
+                elif player.soldbaby:
+                    pc "Not sure about fun, but left with more money at least."
+                    simon.name "Oh? Wow. Hope he paid well."
+                    pc "Yeah right. He got the better deal no doubt."
+                else:
+                    pc "Yeah, though not sure I would have agreed if I knew he would leave something behind in me."
+            else:
+                if player.creamvag > 0:
+                    if player.has_perk(perk_preg_want):
+                        pc "Hopefully a baby. But we will see."
+                    elif player.has_perk(perk_preg_notwant):
+                        pc "Hopefully not."
+                    else:
+                        pc "Not sure..."
+                else:
+                    pc "I've been careful so shouldn't be a baby"
+        else:
+            pc "Probably need to do a bit more working out..."
+    elif player.pregnancy > 1:
+        simon.name "Looks even bigger naked. Bet you had fun making that."
+        if player.rapebaby:
+            pc "Yeah sure. Knocked up while being raped is always fun."
+            simon.name "Oh? Sorry..."
+        elif player.virginbaby:
+            pc "Great time. Lost my virginity and got a baby all at the same time."
+            simon.name "Ah wow. What luck."
+        elif player.soldbaby:
+            pc "Not sure about fun, but left with more money at least."
+            simon.name "Oh? Wow. Hope he paid well."
+            pc "Yeah right. He got the better deal no doubt."
+        else:
+            pc "Yeah, though not sure I would have agreed if I knew he would leave something behind in me."
+    else:
+        simon.name "You are such a sexy munchkin."
+        pc "Oi, call me that again and I'll put my clothes back on."
+        simon.name "Wow, ok..."
+
+    simon.name "Let's see what you have."
+    $ npc_race_picker(simon)
+    show sb_againstwall2 
+    hide simon
+    with dissolve
+    simon.name "Such a perfect arse."
+    show sb_againstwall2 pokevaghand with dissolve
+    if player.check_sex_agree(3, notif=False):
+        show sb_againstwall2 mast happy with dissolve
+        pc "If you like my arse that much then you will love it here."
+        simon.name "Oh I'm sure I will."
+    if player.desire > 80:
+        simon.name "Fuck, you are totally soaking. No wonder you just came up and asked to fuck for the info."
+        pc "Well, two birds and all that."
+    simon.name "So glad The Institute sent someone like you. Sure do know how to convince someone."
+    pc "Mmmm."
+    simon.name "Gonna have to poke my nose in their business more often."
+    show sb_againstwall2 pokevag with dissolve
+    pc "Keep provoking them and next time it might be you getting poked instead of me."
+    simon.name "Much prefer it be you."
+    $ player.spank()
+    pc "Ah!"
+    simon.name "Mmmm, sending a little whore to me. Have to thank them."
+    pc "Don't call me little."
+    simon.name "Err, ok... That's the word that upsets you and not being called a whore."
+    if player.iswhore:
+        pc "Well, I am a whore so what do I care?"
+
+
+# === scripts\a_quests\a_main_quest_missions\main_quest_01\main_quest_01_b_pub.rpy: label main_quest_01_reporter_bargirl_branch ===
+label main_quest_01_reporter_bargirl_branch:
+    pcm "Dressing as a waitress should get me close to him."
+    $ walk(loc_pub_changingroom)
+    $ player.face_neutral()
+    pause 1
+    $ pc_strip()
+    pause 0.5
+    $ pub_waitress.work_dress()
+    pcm "Right, so apparently he has been here quite a bit so I can probably just pretend I have seen him around."
+    pcm "Can't say I have noticed him though so maybe he doesn't interact with the girls much."
+    $ walk(loc_pub)
+    $ player.face_neutral()
+    pause 0.5
+    pcm "Right, looks like he is low on booze."
+    $ npc_race_picker(simon)
+    show pub_serve_talking 
+    $ player.face_happy()
+    with dissolve
+    pc "Hey sweetheart, get you another?"
+    simon.name "Err, sure."
+    hide pub_serve_talking 
+    $ player.face_neutral()
+    with dissolve
+    "I head over to the bar and grab a couple of beers from behind the counter."
+    show pub_serve_clevage 
+    $ player.face_happy()
+    with dissolve
+    pc "Here you go darling."
+    simon.name "Thanks."
+    hide pub_serve_clevage
+    show pub_serve_talking
+    $ player.face_neutral()
+    with dissolve
+    pc "So whats on your mind?"
+    simon.name "Huh?"
+    pc "Normally when people are alone in here, they can't take their eyes off the serving girls. Seen you round here a lot and your mind is always elsewhere."
+    simon.name "Ah. Yeah, can't say I'm here to ogle the girls."
+    pc "Well you nurse those drinks more than most in here. So what you after? Maybe I can help you out."
+    if player.check_speech(If(c.pants,3,1)):
+        $ add_to_list(main_quest_01.list, "waitress_branch_pass_convince")
+        simon.name "Hmm. Tell you what. See that guy over there?"
+        pc "Hmm, yeah."
+        simon.name "What do you know about him?"
+        pc "Hmm, seen him about. Why do you want to know?"
+        simon.name "That's for me to know."
+        pc "Well, if you want me to ask around and see what the other girls know, you're going to have to indulge my curiosity."
+        simon.name "Hmmm..."
+        simon.name "Ok, sure. Ask the other girls and I'll tell you."
+        pc "Right."
+        hide pub_serve_talking with dissolve
+        pcm "Hmm, only interested in him specifically..."
+        show trixie at right5 with dissolve
+        pc "That fella over there. What's his deal?"
+        show trixie with dissolve:
+            xzoom -1
+        trixie.name "Ah that's Bob. In here pretty much every day."
+        show trixie with dissolve:
+            xzoom 1
+        pc "What do you know about him?"
+        trixie.name "Well, he's married, so not sure you are going to get the good life off him."
+        trixie.name "He's usually in here early while I'm workin' and sticks to me like glue. Lonely fella even though he has a wife."
+        if pub_waitress.sold > 4:
+            pc "He ever pay for extra service?"
+            trixie.name "Yeah when he can afford it. Mostly just drowns his sorrows and whines to anyone who listens."
+            pc "Whines?"
+            trixie.name "Yeah, wife not treatin' him well or some sob story like that. Who knows with a drunkard. Don't really care as long as he pays up."
+            
+        else:
+            pc "He a pervert like the rest?"
+            trixie.name "Of course. Doesn't normally have the cash to keep anyone's attention, but now and then he has a bit."
+            pc "He... Errr... You know..."
+            trixie.name "Pay for extra? When he can afford it, which isn't common. Best to ignore him and focus on the others with heavier pockets."
+        pc "Anything else you know about him?"
+        trixie.name "Why do you care?"
+        pc "Don't really. But I have a side gig so need to ask."
+        trixie.name "Ah. Well not much else anyway. In here every day from work end to closing. Lecherous like most round here but too broke to pay for much."
+        pc "Thanks."
+        trixie.name "Sure, I expect a drink from you if this gig is getting you paid."
+        pc "Heh, sure."
+        hide trixie with dissolve
