@@ -1,0 +1,79 @@
+ Volume in drive A is SSD 2tb
+ Volume Serial Number is FEE9-EDEC
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game
+
+09.07.2026  21:14    <DIR>          .
+09.07.2026  21:14    <DIR>          ..
+09.07.2026  21:12    <DIR>          audio
+19.01.2026  13:16            96 880 BRLNSB.TTF
+19.01.2026  13:16            96 852 BRLNSDB.TTF
+19.01.2026  13:16            97 284 BRLNSR.TTF
+09.07.2026  21:16    <DIR>          cache
+24.06.2026  13:49       146 495 684 images.rpa
+09.07.2026  21:16    <DIR>          saves
+24.06.2026  13:47        25 360 978 scripts.rpa
+19.01.2026  13:16                 9 script_version.txt
+09.07.2026  21:12    <DIR>          tl
+               6 File(s)    172 147 687 bytes
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game\audio
+
+09.07.2026  21:12    <DIR>          .
+09.07.2026  21:12    <DIR>          ..
+19.01.2026  13:16               243 Credits.txt
+19.01.2026  13:16         6 837 919 hayden-folker-abandoned-the-outskirts.mp3
+19.01.2026  13:16         3 985 288 hayden-folker-downpour.mp3
+19.01.2026  13:16         6 779 405 hayden-folker-drifting-away.mp3
+19.01.2026  13:16         7 789 821 hayden-folker-grace.mp3
+19.01.2026  13:16         3 327 062 hayden-folker-heroes-rise.mp3
+19.01.2026  13:16         6 720 891 hayden-folker-i-spy.mp3
+19.01.2026  13:16         6 897 479 hayden-folker-parallax-mix-new-4.mp3
+19.01.2026  13:16        13 318 316 hayden-folker-the-scavengers.mp3
+19.01.2026  13:16         3 212 123 hayden-folker-the-way-out-despair.mp3
+19.01.2026  13:16         3 450 300 hayden-folker-to-see-the-past.mp3
+              11 File(s)     62 318 847 bytes
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game\cache
+
+09.07.2026  21:16    <DIR>          .
+09.07.2026  21:16    <DIR>          ..
+19.01.2026  13:16         2 103 702 bytecode-27.rpyb
+17.01.2026  22:18         3 411 973 bytecode-312.rpyb
+19.01.2026  13:16         3 218 243 bytecode-39.rpyb
+24.06.2026  13:47         7 228 857 bytecode.rpyb
+19.01.2026  13:16           637 168 py3analysis.rpyb
+24.06.2026  13:47         1 619 007 pyanalysis.rpyb
+24.06.2026  13:47           625 611 screens.rpyb
+09.07.2026  21:16             2 087 shaders.txt
+               8 File(s)     18 846 648 bytes
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game\saves
+
+09.07.2026  21:16    <DIR>          .
+09.07.2026  21:16    <DIR>          ..
+09.07.2026  21:16           345 588 auto-1-LT1.save
+09.07.2026  21:15           465 600 auto-2-LT1.save
+09.07.2026  21:15           467 882 auto-3-LT1.save
+09.07.2026  21:15           463 245 auto-4-LT1.save
+09.07.2026  21:16            18 661 persistent
+               5 File(s)      1 760 976 bytes
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game\tl
+
+09.07.2026  21:12    <DIR>          .
+09.07.2026  21:12    <DIR>          ..
+09.07.2026  21:12    <DIR>          None
+               0 File(s)              0 bytes
+
+ Directory of A:\NewHentai\TheFixer-0.3.6.04-pc\game\tl\None
+
+09.07.2026  21:12    <DIR>          .
+09.07.2026  21:12    <DIR>          ..
+19.01.2026  13:16            36 561 common.rpym
+24.06.2026  13:46            27 080 common.rpymc
+               2 File(s)         63 641 bytes
+
+     Total Files Listed:
+              32 File(s)    255 137 799 bytes
+              17 Dir(s)  185 959 436 288 bytes free
