@@ -29,6 +29,19 @@ init python:
 
     # Поддержка двойной совместимости Python 2 (RenPy 7) и Python 3 (RenPy 8)
     try:
+        unicode  # type: ignore  # noqa: F821  # Py2
+    except NameError:
+        unicode = str  # Py3 / Ren'Py 8
+    try:
+        basestring  # type: ignore  # noqa: F821
+    except NameError:
+        basestring = str  # Py3
+    try:
+        long  # type: ignore  # noqa: F821
+    except NameError:
+        long = int  # Py3
+
+    try:
         import urllib.request as urllib2
         import urllib.parse as urllib
     except ImportError:
@@ -51,18 +64,24 @@ init python:
     OLLAMA_LOW_VRAM = True          # более щадящий режим под 4GB VRAM
     OLLAMA_NUM_THREAD = 4           # не душим CPU лишними потоками, когда часть работы уйдёт на GPU
     OLLAMA_NUM_BATCH = 32           # меньше batch => меньше риск вывалиться из VRAM в RAM/CPU
-    OLLAMA_NUM_CTX = 1536           # ещё чуть меньше контекст, чтобы стабильно помещаться в 4GB
+    OLLAMA_NUM_CTX = 2048           # 2048: нужно для деревьев квестов (3-4 шага) на 4GB VRAM
 
     # SAFE MODE для слабой/маленькой VRAM:
     # - отключает тяжёлую фоновую магию, которая забивает очередь Ollama
     # - отключает полные цепочки квестов и берёт более лёгкие одиночные события
     # - сериализует все запросы к Ollama одним глобальным lock, чтобы не было 5-10 одновременных потоков
     AI_LOW_VRAM_SAFE_MODE = True
-    AI_ENABLE_FULL_QUEST_CHAIN = False
+    # Полные деревья квестов (3-4 стадии) для РУЧНОЙ генерации события.
+    # SAFE_MODE по-прежнему режет фоновый prefetch/SMS/auto, но НЕ рубит цепочки квестов.
+    AI_ENABLE_FULL_QUEST_CHAIN = True
+    AI_FULL_QUEST_MIN_STEPS = 3
+    AI_FULL_QUEST_MAX_STEPS = 5
+    AI_FULL_QUEST_MAX_TOKENS = 900
+    AI_FULL_QUEST_TIMEOUT = 180
     AI_EVENT_MAX_TOKENS = 420
     AI_PREFETCH_MAX_TOKENS = 280
     AI_EVENT_DEBUG = True
-    AI_PATCH_BUILD = "2026-07-10-uifix3"
+    AI_PATCH_BUILD = "2026-07-10-tree2"
     ai_ollama_global_lock = threading.Lock()
 
     # Текстовые описания 3D-окружения на основе скриншотов из папки Фотографии (для погружения ИИ в обстановку)
@@ -111,12 +130,23 @@ init python:
 
     # Экранирование фигурных скобок для предотвращения крашей RenPy из-за "Unknown text tag"
     def ai_escape_renpy_text(text):
-        if not isinstance(text, (str, unicode)):
-            if text is None:
-                return ""
-            return unicode(text)
-        # Дублируем фигурные скобки, чтобы RenPy выводил их как литералы и не пытался парсить как теги текста
-        return text.replace("{", "{{").replace("}", "}}")
+        if text is None:
+            return u""
+        if not isinstance(text, basestring):
+            try:
+                text = unicode(text)
+            except Exception:
+                text = u"%s" % text
+        else:
+            text = unicode(text)
+        # Дублируем { } и [ ], чтобы Ren'Py не парсил их как text tags / interpolations
+        return (
+            text
+            .replace("{", "{{")
+            .replace("}", "}}")
+            .replace("[", "[[")
+            .replace("]", "]]")
+        )
 
     def ai_write_debug_file(filename, text):
         try:
@@ -156,6 +186,7 @@ init python:
     def ai_reset_quest_state():
         store.ai_full_quest_data = None
         store.ai_full_quest_current_step = "step1"
+        store.ai_quest_path = []
         store.ai_prefetched = {}
         store.ai_pending_event = None
         store.ai_event_ui_cache = None
@@ -171,6 +202,133 @@ init python:
         store.ai_current_automatic_event = None
 
     # Потокобезопасная функция динамического добавления ИИ-перка на игрока в сейв-файл
+    def ai_dict_like(obj):
+        """True for dict / RevertableDict / any mapping with .get"""
+        if obj is None:
+            return False
+        if isinstance(obj, dict):
+            return True
+        return hasattr(obj, 'get') and hasattr(obj, '__getitem__')
+
+    def ai_to_text(value, default=u""):
+        if value is None:
+            return unicode(default)
+        try:
+            return unicode(value)
+        except Exception:
+            try:
+                return u"%s" % value
+            except Exception:
+                return unicode(default)
+
+    def ai_stage_event_for_ui(evt, reason=u"staged"):
+        """Единая точка: кладём событие в store-переменные, которые читает ai_event_screen."""
+        try:
+            evt = ai_normalize_event(evt)
+        except Exception as e:
+            print("ai_stage_event_for_ui normalize err: %s" % e)
+            evt = {
+                "title": u"Quest Challenge",
+                "description": ai_to_text(evt, u"Event ready."),
+                "choices": [{"text": u"Continue", "effects": {}}],
+                "is_quest": False,
+                "outfit_suggestion": {"items": []},
+            }
+
+        if not ai_dict_like(evt):
+            evt = {
+                "title": u"Quest Challenge",
+                "description": ai_to_text(evt, u"Event ready."),
+                "choices": [{"text": u"Continue", "effects": {}}],
+                "is_quest": False,
+                "outfit_suggestion": {"items": []},
+            }
+
+        title = ai_to_text(evt.get('title', u'Событие'), u'Событие')
+        desc = ai_to_text(evt.get('description', u'...'), u'...')
+        if not desc or desc.strip() in [u"", u"...", u"None", u"None."]:
+            desc = u"Samantha continues her femininity training, making choices that shape her new life."
+            evt['description'] = desc
+        if not title or title.strip() in [u"", u"...", u"None", u"None."]:
+            title = u"Quest Challenge"
+            evt['title'] = title
+
+        choices = evt.get('choices', []) or []
+        # Гарантируем list + dict-like choices с text
+        safe_choices = []
+        try:
+            for ch in list(choices)[:5]:
+                if ai_dict_like(ch):
+                    ct = ai_to_text(ch.get('text', u'Continue'), u'Continue')
+                    if not ct or ct.strip() in [u"", u"...", u"None"]:
+                        ct = u"Continue"
+                    # Полная копия, чтобы next_step/effects/ending/perk не терялись
+                    eff = ch.get('effects', {})
+                    if not ai_dict_like(eff):
+                        eff = {}
+                    else:
+                        # shallow copy
+                        try:
+                            eff = dict(eff)
+                        except Exception:
+                            pass
+                    # perk_add may sit on choice root in some model outputs
+                    if 'perk_add' not in eff and ch.get('perk_add') is not None:
+                        eff['perk_add'] = ch.get('perk_add')
+                    safe_ch = {
+                        "text": ct,
+                        "effects": eff,
+                        "next_step": ch.get('next_step', ch.get('next', ch.get('goto', None))),
+                        "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)),
+                        "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
+                        "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
+                        "is_ending": bool(ch.get('is_ending', False)),
+                    }
+                    safe_choices.append(safe_ch)
+                else:
+                    safe_choices.append({"text": ai_to_text(ch, u"Continue"), "effects": {}, "next_step": None})
+        except Exception as e:
+            print("ai_stage_event_for_ui choices err: %s" % e)
+            safe_choices = []
+        if not safe_choices:
+            safe_choices = [{"text": u"Continue", "effects": {}}]
+        evt['choices'] = safe_choices
+
+        outfit = evt.get('outfit_suggestion', {}) or {}
+        if not ai_dict_like(outfit):
+            outfit = {}
+        items = outfit.get('items', []) if ai_dict_like(outfit) else []
+        if items is None:
+            items = []
+
+        store.ai_last_event = evt
+        store.ai_event_ui_cache = evt
+        store.ai_event_title = title
+        store.ai_event_desc = desc
+        store.ai_event_choices = safe_choices
+        store.ai_event_outfit_items = list(items) if items else []
+        store.ai_event_is_quest = bool(evt.get('is_quest', False))
+        store.ai_event_qtitle = ai_to_text(evt.get('quest_title', u''), u'')
+        store.ai_event_qdesc = ai_to_text(evt.get('quest_desc', u''), u'')
+
+        try:
+            ai_set_event_debug(
+                reason,
+                parsed={
+                    "title": store.ai_event_title,
+                    "description": store.ai_event_desc,
+                    "choices": [
+                        (c.get('text') if ai_dict_like(c) else unicode(c))
+                        for c in store.ai_event_choices
+                    ],
+                    "is_quest": store.ai_event_is_quest,
+                },
+            )
+        except Exception as e:
+            print("ai_stage_event_for_ui debug err: %s" % e)
+        return evt
+
+
     def ai_add_dynamic_perk(perk_name, perk_desc=None, perk_type="allure", stat_add=5):
         try:
             p = getattr(store, 'player', None)
@@ -233,6 +391,11 @@ init python:
                         parsed = ast.literal_eval(evt.strip())
                     except:
                         pass
+                if parsed is None:
+                    try:
+                        parsed = json.loads(evt.strip())
+                    except:
+                        pass
             
             if parsed and hasattr(parsed, 'get'):
                 evt = parsed
@@ -243,20 +406,48 @@ init python:
                     "description": unicode(evt),
                     "choices": [{"text": "Continue", "effects": {}}]
                 }
-        
+
+        # Иногда LLM кладёт event внутрь {"event": {...}} или {"data": {...}}
+        try:
+            if 'title' not in evt and 'description' not in evt:
+                for wrap_key in ('event', 'data', 'result', 'quest', 'response'):
+                    inner = evt.get(wrap_key)
+                    if hasattr(inner, 'get') and (inner.get('title') is not None or inner.get('description') is not None or inner.get('choices') is not None):
+                        evt = inner
+                        break
+        except Exception:
+            pass
+
+        # Маппинг альтернативных ключей (Title/Description/Choices/options/actions)
+        def _pick(d, *keys, **kw):
+            default = kw.get('default', None)
+            for k in keys:
+                if k in d and d.get(k) not in (None, ''):
+                    return d.get(k)
+            # case-insensitive
+            try:
+                low = {unicode(k).lower(): v for k, v in d.items()}
+                for k in keys:
+                    lk = unicode(k).lower()
+                    if lk in low and low[lk] not in (None, ''):
+                        return low[lk]
+            except Exception:
+                pass
+            return default
+
         # Нормализация заголовка и описания с предохранителем от ленивой генерации ИИ ("...")
-        title = evt.get('title', 'Event')
-        if not title or unicode(title).strip() in ["", "...", "None", "None."]:
+        title = _pick(evt, 'title', 'Title', 'name', 'Name', 'event_title', default='Event')
+        if not title or unicode(title).strip() in ["", "...", "None", "None.", "title", "string"]:
             title = "Quest Challenge"
             
-        desc = evt.get('description', '')
-        if not desc or unicode(desc).strip() in ["", "...", "None", "None."]:
+        desc = _pick(evt, 'description', 'Description', 'desc', 'Desc', 'text', 'body', 'content', default='')
+        if not desc or unicode(desc).strip() in ["", "...", "None", "None.", "description", "string"]:
             desc = "Samantha continues her femininity training, making choices that shape her new life."
             
         evt['title'] = title
         evt['description'] = desc
         
-        choices = evt.get('choices', [])
+        choices = _pick(evt, 'choices', 'Choices', 'options', 'Options', 'actions', 'Actions', default=[])
         if not choices:
             choices = [{"text": "Continue", "effects": {}}]
             
@@ -309,17 +500,44 @@ init python:
             
             # Если теперь это словарь, нормализуем поля
             if hasattr(ch, 'get'):
-                ch_text = ch.get('text', 'Continue')
-                if not ch_text or unicode(ch_text).strip() in ["", "...", "None"]:
+                ch_text = ch.get('text', None)
+                if ch_text is None:
+                    for k in ('Text', 'label', 'Label', 'choice', 'option', 'name', 'action'):
+                        if ch.get(k) not in (None, ''):
+                            ch_text = ch.get(k)
+                            break
+                if not ch_text or unicode(ch_text).strip() in ["", "...", "None", "text", "string"]:
                     ch_text = "Continue"
-                ch_effects = ch.get('effects', {})
+                ch_effects = ch.get('effects', None)
+                if ch_effects is None:
+                    ch_effects = ch.get('Effects', {})
                 if not hasattr(ch_effects, 'get'):
                     ch_effects = {}
+                ns_val = ch.get('next_step', ch.get('next', ch.get('goto', ch.get('nextStep', None))))
+                if ns_val is not None:
+                    ns_txt = unicode(ns_val).strip()
+                    if ns_txt.lower() in [u'', u'null', u'none', u'end', u'finish', u'done']:
+                        ns_val = None
+                    else:
+                        ns_val = ns_txt
+                if not hasattr(ch_effects, 'get'):
+                    ch_effects = {}
+                else:
+                    try:
+                        ch_effects = dict(ch_effects)
+                    except Exception:
+                        pass
+                if 'perk_add' not in ch_effects and ch.get('perk_add') is not None:
+                    ch_effects['perk_add'] = ch.get('perk_add')
                 normalized_choices.append({
                     "text": unicode(ch_text),
                     "effects": ch_effects,
-                    "next_step": ch.get('next_step'),
-                    "spicy_modifier": ch.get('spicy_modifier', 0) # Считываем динамический спайси-модификатор выбора!
+                    "next_step": ns_val,
+                    "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)) or 0,
+                    "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
+                    "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
+                    "is_ending": bool(ch.get('is_ending', False) or (ns_val is None)),
+                    "is_ending_ack": bool(ch.get('is_ending_ack', False)),
                 })
             else:
                 # Если это просто плоская строка (например, "Да, пойти")
@@ -422,7 +640,7 @@ Guidelines:
         renpy.restart_interaction()
 
     # Base call с настраиваемым таймаутом 25 секунд для разгрузки Олламы
-    def ai_call(model, sys_prompt, user_prompt, want_json=False, temp=0.85, max_tokens=700, task_desc=None):
+    def ai_call(model, sys_prompt, user_prompt, want_json=False, temp=0.85, max_tokens=700, task_desc=None, timeout=120, force_json_format=True):
         if task_desc:
             try:
                 # Добавляем в очередь уведомлений информацию о старте генерации
@@ -449,7 +667,9 @@ Guidelines:
             req_options["low_vram"] = OLLAMA_LOW_VRAM
         
         payload={"model":model,"messages":messages,"stream":False,"options":req_options}
-        if want_json:
+        # format=json помогает, но на очень слабых GGUF иногда даёт пустой/битый ответ.
+        # Для деревьев квестов можно выключить force_json_format и парсить вручную.
+        if want_json and force_json_format:
             payload["format"]="json"
         lock_acquired = False
         raw_content = None
@@ -462,8 +682,8 @@ Guidelines:
 
             data=json.dumps(payload).encode('utf-8')
             req=urllib2.Request(OLLAMA_URL, data=data, headers={'Content-Type':'application/json'})
-            # Увеличен таймаут до 120 секунд во избежание сброса соединения на медленных CPU
-            resp=urllib2.urlopen(req, timeout=120)
+            # Таймаут настраиваемый: деревья квестов могут идти дольше одиночных событий
+            resp=urllib2.urlopen(req, timeout=timeout or 120)
             res=json.loads(resp.read().decode('utf-8'))
             content=res['message']['content']
             
@@ -508,6 +728,10 @@ Guidelines:
         except Exception as e:
             err_msg = str(e)
             print("AI call error %s: %s" % (model, err_msg))
+            try:
+                store.ai_debug_last_json_raw = unicode(raw_content) if raw_content else u"AI_CALL_EXCEPTION: %s" % err_msg
+            except Exception:
+                pass
             if task_desc:
                 try:
                     store.ai_notify_queue.append(u"ИИ: Сбой (%s)" % task_desc)
@@ -515,7 +739,7 @@ Guidelines:
                     pass
             if "404" in err_msg or "not found" in err_msg.lower():
                 return "__ERROR_MODEL_NOT_FOUND__"
-            elif "111" in err_msg or "connection refused" in err_msg.lower() or "timed out" in err_msg.lower():
+            elif "111" in err_msg or "connection refused" in err_msg.lower() or "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
                 return "__ERROR_OLLAMA_OFFLINE__"
             return "__ERROR__ %s" % err_msg
         finally:
@@ -721,20 +945,26 @@ Guidelines:
 
     def ai_filter_event_by_comfort(event):
         try:
-            from ai_config_tags import AI_COMFORT_DICT, ai_event_has_hard_blocked_content
+            from ai_config_tags import AI_COMFORT_DICT
             from ai_config_locations import ai_is_theme_allowed_in_location
 
-            # Централизованный неотключаемый safety-block.
-            # Он вынесен из промптов в единое место архитектуры и применяется ко всем событиям после генерации.
-            if ai_event_has_hard_blocked_content(event):
-                print("Event blocked by centralized hard safety filter")
-                try:
-                    ai_set_event_debug(u"Event was blocked by centralized hard safety filter", parsed=event)
-                except:
-                    pass
-                return False
+            # optional hard block if user added it to ai_config_tags.rpy
+            try:
+                from ai_config_tags import ai_event_has_hard_blocked_content
+                if ai_event_has_hard_blocked_content(event):
+                    print("Event blocked by centralized hard safety filter")
+                    try:
+                        ai_set_event_debug(u"Event was blocked by centralized hard safety filter", parsed=event)
+                    except:
+                        pass
+                    return False
+            except ImportError:
+                pass
 
-            tags = event.get('tags', [])
+            if not ai_dict_like(event):
+                return True
+
+            tags = event.get('tags', []) or []
             if not tags:
                 type_to_tag = {
                     "femininity": ["femininity"],
@@ -746,13 +976,16 @@ Guidelines:
                 }
                 tags = type_to_tag.get(event.get('type',''), [])
             for tag in tags:
-                if not AI_COMFORT_DICT.get(tag) or AI_COMFORT_DICT[tag]['level']==0:
+                # Неизвестный тег НЕ блокируем (раньше AI_COMFORT_DICT.get(tag) or ... валил любые кастомные теги)
+                conf = AI_COMFORT_DICT.get(tag)
+                if conf is not None and conf.get('level', 0) == 0:
                     print("Event blocked by comfort tag %s" % tag)
                     return False
-                loc = get_state().get('location','home')
-                if not ai_is_theme_allowed_in_location(tag, loc):
-                    print("Event tag %s not allowed in location %s" % (tag, loc))
-                    return False
+                if conf is not None:
+                    loc = get_state().get('location','home')
+                    if not ai_is_theme_allowed_in_location(tag, loc):
+                        print("Event tag %s not allowed in location %s" % (tag, loc))
+                        return False
             return True
         except Exception as e:
             print("filter comfort err %s" % e)
@@ -859,17 +1092,686 @@ Guidelines:
             print("spawn err %s" % e)
             return None
 
-    def generate_full_quest(gs):
+    def ai_format_effects_summary(effects):
+        """Человекочитаемый список наград/штрафов для финала."""
+        if not ai_dict_like(effects):
+            return u""
+        parts = []
+        labels = {
+            "femininity": u"Femininity",
+            "confidence": u"Confidence",
+            "corrupt": u"Corruption",
+            "desire": u"Desire",
+            "mood": u"Mood",
+            "fitness": u"Fitness",
+            "money": u"Money",
+            "horny": u"Horny",
+            "trust": u"Trust",
+            "accept": u"Acceptance",
+        }
+        for k, label in labels.items():
+            if k in effects and effects.get(k) not in (None, "", 0, "0"):
+                try:
+                    val = int(effects.get(k))
+                    parts.append(u"%s %+d" % (label, val))
+                except Exception:
+                    parts.append(u"%s %s" % (label, effects.get(k)))
+        perk = effects.get('perk_add')
+        if perk:
+            if ai_dict_like(perk):
+                pname = ai_to_text(perk.get('name', u'New Trait'), u'New Trait')
+            else:
+                pname = ai_to_text(perk, u'New Trait')
+            parts.append(u"Perk: %s" % pname)
+        if effects.get('give_item'):
+            parts.append(u"Item: %s" % ai_to_text(effects.get('give_item'), u'item'))
+        return u" | ".join(parts)
+
+    def ai_apply_choice_effects(ch):
+        """Применяет effects выбора (статы/деньги/перк/предмет). Возвращает summary-строку."""
+        summary_bits = []
         try:
-            recent_acts = "\\n- ".join(getattr(store, 'ai_recent_actions', [])) if getattr(store, 'ai_recent_actions', []) else "None"
-            loc_desc = ai_get_location_description(gs['location'])
-            prompt="Full quest for fem=%s%% conf=%s loc=%s (%s) outfit=%s perks=%s hour=%s timeofday=%s. Population: %s people are around. Active Perks/Traits: %s. Recent GG actions:\\n- %s" % (gs['fem'], gs['confidence'], gs['location'], loc_desc, gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], gs.get('location_population',0), gs.get('perks', 'Former man'), recent_acts)
-            data=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event_full"], prompt, want_json=True, temp=0.88, max_tokens=1200, task_desc=u"Цепочка квестов")
-            if data and 'steps' in data and len(data['steps'])>=2:
-                return data
+            if not ai_dict_like(ch):
+                return u""
+            eff = ch.get('effects', {}) if ai_dict_like(ch.get('effects', {})) else {}
+            if not ai_dict_like(eff):
+                # sometimes effects are flat on choice
+                eff = {}
+            # also allow flat stats on choice root
+            for k in ("femininity", "confidence", "corrupt", "desire", "mood", "fitness", "money", "horny", "trust", "accept", "perk_add", "give_item"):
+                if k not in eff and ch.get(k) is not None and k not in ("text", "next_step"):
+                    # only copy if looks like reward field present on root and not already in effects
+                    if k in ch and ch.get(k) not in (None, ""):
+                        # don't pull text-like roots
+                        if k in ("perk_add", "give_item") or isinstance(ch.get(k), (int, float, long)) or (isinstance(ch.get(k), basestring) and unicode(ch.get(k)).lstrip('-').isdigit()):
+                            eff[k] = ch.get(k)
+            if ch.get('perk_add') is not None and 'perk_add' not in eff:
+                eff['perk_add'] = ch.get('perk_add')
+
+            p = getattr(store, 'player', None)
+            if p is None:
+                try:
+                    p = player
+                except Exception:
+                    p = None
+
+            def _i(v, default=0):
+                try:
+                    return int(v)
+                except Exception:
+                    return default
+
+            if 'confidence' in eff and p is not None:
+                d = _i(eff['confidence'])
+                try:
+                    p.add_conf(d)
+                except Exception:
+                    try:
+                        p._confidence = max(0, min(100, getattr(p, '_confidence', 35) + d))
+                    except Exception:
+                        pass
+            if 'femininity' in eff:
+                d = _i(eff['femininity'])
+                store.ai_fem = max(0, min(100, getattr(store, 'ai_fem', 25) + d))
+            if 'corrupt' in eff and p is not None and hasattr(p, 'corrupt'):
+                p.corrupt = max(0, p.corrupt + _i(eff['corrupt']))
+            if 'desire' in eff and p is not None:
+                d = _i(eff['desire'])
+                try:
+                    if hasattr(p, 'add_desire'):
+                        p.add_desire(d)
+                    elif hasattr(p, '_desire'):
+                        p._desire = max(0, min(100, p._desire + d))
+                except Exception:
+                    pass
+            if 'mood' in eff and p is not None and hasattr(p, 'mood'):
+                try:
+                    p.mood = max(0, min(100, p.mood + _i(eff['mood'])))
+                except Exception:
+                    pass
+            if 'fitness' in eff and p is not None:
+                d = _i(eff['fitness'])
+                try:
+                    if hasattr(p, 'add_fit'):
+                        p.add_fit(d)
+                    elif hasattr(p, '_fitness'):
+                        p._fitness = max(0, min(100, p._fitness + d))
+                except Exception:
+                    pass
+            if 'money' in eff and p is not None:
+                d = _i(eff['money'])
+                try:
+                    if d >= 0:
+                        p.add_money(d)
+                    else:
+                        p.remove_money(abs(d))
+                except Exception:
+                    pass
+            if 'horny' in eff:
+                store.ai_horny = max(0, min(100, getattr(store, 'ai_horny', 5) + _i(eff['horny'])))
+            if 'trust' in eff:
+                store.ai_trust = max(0, min(100, getattr(store, 'ai_trust', 40) + _i(eff['trust'])))
+            if 'accept' in eff:
+                store.ai_accept = max(0, min(100, getattr(store, 'ai_accept', 20) + _i(eff['accept'])))
+            if 'give_item' in eff:
+                try:
+                    item_obj = getattr(store, eff['give_item'], None)
+                    if item_obj and hasattr(store, 'inv'):
+                        store.inv.add(item_obj)
+                except Exception as e:
+                    print("give_item err: %s" % e)
+
+            spicy_mod = ch.get('spicy_modifier', 0)
+            if spicy_mod:
+                try:
+                    store.ai_spicy_meter = max(0, min(100, getattr(store, 'ai_spicy_meter', 20) + int(spicy_mod)))
+                    store.ai_notify_queue.append(u"ИИ: Spicy метр %+d%%" % int(spicy_mod))
+                except Exception:
+                    pass
+
+            if 'perk_add' in eff and eff.get('perk_add'):
+                p_add = eff['perk_add']
+                p_name = u""
+                p_desc = None
+                p_type = "allure"
+                p_val = 5
+                if ai_dict_like(p_add):
+                    p_name = ai_to_text(p_add.get('name', u'Marked'), u'Marked')
+                    p_desc = p_add.get('desc') or p_add.get('description')
+                    p_type = ai_to_text(p_add.get('type', u'allure'), u'allure')
+                    try:
+                        p_val = int(p_add.get('add', p_add.get('value', 5)))
+                    except Exception:
+                        p_val = 5
+                else:
+                    p_name = ai_to_text(p_add, u'Marked')
+                if p_name:
+                    ai_add_dynamic_perk(p_name, p_desc, p_type, p_val)
+
+            summary_bits.append(ai_format_effects_summary(eff))
+            if spicy_mod:
+                try:
+                    summary_bits.append(u"Spicy %+d" % int(spicy_mod))
+                except Exception:
+                    pass
         except Exception as e:
-            print("full quest gen err %s" % e)
-        return None
+            print("ai_apply_choice_effects err: %s" % e)
+        return u" | ".join([b for b in summary_bits if b])
+
+    def ai_build_quest_ending_event(full_q, ch, cur_evt=None):
+        """Строит финальный экран ветки: итог + награды."""
+        try:
+            qtitle = u"Quest"
+            if ai_dict_like(full_q):
+                qtitle = ai_to_text(full_q.get('title', u'Quest'), u'Quest')
+            elif ai_dict_like(cur_evt):
+                qtitle = ai_to_text(cur_evt.get('quest_title', cur_evt.get('title', u'Quest')), u'Quest')
+
+            ending_title = None
+            ending_text = None
+            if ai_dict_like(ch):
+                ending_title = ch.get('ending_title') or ch.get('endingTitle') or ch.get('result_title')
+                ending_text = ch.get('ending_text') or ch.get('endingText') or ch.get('result_text') or ch.get('ending')
+            if not ending_title and ai_dict_like(cur_evt):
+                ending_title = cur_evt.get('ending_title')
+            if not ending_text and ai_dict_like(cur_evt):
+                ending_text = cur_evt.get('ending_text')
+
+            choice_txt = ai_to_text(ch.get('text', u'your final choice'), u'your final choice') if ai_dict_like(ch) else u'your final choice'
+            if not ending_title or unicode(ending_title).strip() in [u'', u'...', u'None']:
+                ending_title = u"Ending: %s" % qtitle
+            if not ending_text or unicode(ending_text).strip() in [u'', u'...', u'None']:
+                # fallback summary from path
+                path = getattr(store, 'ai_quest_path', None) or []
+                if path:
+                    path_txt = u" -> ".join([ai_to_text(x, u'?') for x in path[-4:]])
+                    ending_text = (
+                        u"Your path through '%s' ends here. Final choice: %s. "
+                        u"Route: %s. The consequences settle in as you move on."
+                    ) % (qtitle, choice_txt, path_txt)
+                else:
+                    ending_text = (
+                        u"Your branch of '%s' is complete. You chose: %s. "
+                        u"The moment leaves a lasting mark on Samantha's training."
+                    ) % (qtitle, choice_txt)
+
+            # rewards already applied from the choice effects; show them again as summary
+            eff = {}
+            if ai_dict_like(ch):
+                eff = ch.get('effects', {}) if ai_dict_like(ch.get('effects', {})) else {}
+                if ch.get('perk_add') is not None and (not ai_dict_like(eff) or 'perk_add' not in eff):
+                    if not ai_dict_like(eff):
+                        eff = {}
+                    eff = dict(eff) if ai_dict_like(eff) else {}
+                    eff['perk_add'] = ch.get('perk_add')
+            reward_line = ai_format_effects_summary(eff)
+            desc = ai_to_text(ending_text, u'')
+            if reward_line:
+                desc = desc + u"\n\nRewards: " + reward_line
+            else:
+                desc = desc + u"\n\nRewards: experience and a shift in Samantha's mindset."
+
+            # ensure final button has no further next_step; effects already applied
+            evt = {
+                "title": ai_to_text(ending_title, u'Ending'),
+                "description": desc,
+                "type": "quest_ending",
+                "is_quest": True,
+                "quest_title": qtitle,
+                "quest_desc": u"Finale",
+                "outfit_suggestion": {"items": []},
+                "choices": [{
+                    "text": u"Accept the outcome",
+                    "effects": {},
+                    "next_step": None,
+                    "is_ending_ack": True,
+                }],
+                "_full_quest": True,
+                "_is_ending": True,
+                "_step_id": "ending",
+                "tags": ["femininity"],
+            }
+            return ai_normalize_event(evt)
+        except Exception as e:
+            print("ai_build_quest_ending_event err: %s" % e)
+            return ai_normalize_event({
+                "title": u"Quest Complete",
+                "description": u"The branch ends. Samantha carries the consequences with her.",
+                "is_quest": True,
+                "choices": [{"text": u"Continue", "effects": {}, "next_step": None, "is_ending_ack": True}],
+                "_is_ending": True,
+            })
+
+    def ai_ensure_terminal_endings(tree):
+        """Гарантирует, что у каждого тупикового выбора есть ending_title/text и награда."""
+        if not ai_dict_like(tree) or not tree.get('steps'):
+            return tree
+        qtitle = ai_to_text(tree.get('title', u'Quest'), u'Quest')
+        # map id -> step
+        steps = [s for s in tree.get('steps', []) if ai_dict_like(s)]
+        for step in steps:
+            for ch in step.get('choices', []) or []:
+                if not ai_dict_like(ch):
+                    continue
+                ns = ch.get('next_step')
+                if ns:
+                    continue
+                # terminal choice
+                ch['is_ending'] = True
+                if not ch.get('ending_title'):
+                    ch['ending_title'] = u"Outcome: %s" % ai_to_text(step.get('title', qtitle), qtitle)
+                if not ch.get('ending_text'):
+                    ch['ending_text'] = (
+                        u"This branch of '%s' closes after '%s'. "
+                        u"You chose: %s. The city of Blaston remembers the kind of girl you are becoming."
+                    ) % (
+                        qtitle,
+                        ai_to_text(step.get('title', u'this stage'), u'this stage'),
+                        ai_to_text(ch.get('text', u'your choice'), u'your choice'),
+                    )
+                eff = ch.get('effects') if ai_dict_like(ch.get('effects')) else {}
+                if not ai_dict_like(eff):
+                    eff = {}
+                else:
+                    try:
+                        eff = dict(eff)
+                    except Exception:
+                        pass
+                # ensure some reward on terminal choices
+                if not eff:
+                    # mild default based on spicy_modifier sign
+                    sp = 0
+                    try:
+                        sp = int(ch.get('spicy_modifier', 0) or 0)
+                    except Exception:
+                        sp = 0
+                    if sp >= 5:
+                        eff = {"femininity": 4, "corrupt": 1, "confidence": 1}
+                    elif sp <= -5:
+                        eff = {"confidence": 2, "femininity": 1}
+                    else:
+                        eff = {"femininity": 2, "confidence": 1}
+                # chance-like deterministic perk if still missing and path looks bold
+                if 'perk_add' not in eff:
+                    sp = 0
+                    try:
+                        sp = int(ch.get('spicy_modifier', 0) or 0)
+                    except Exception:
+                        sp = 0
+                    # only auto-perk for stronger endings
+                    if sp >= 8 or int(eff.get('femininity', 0) or 0) >= 4 or int(eff.get('corrupt', 0) or 0) >= 2:
+                        ctext = ai_to_text(ch.get('text', u'Marked'), u'Marked')
+                        pname = ai_to_text(step.get('title', u'Trained'), u'Trained')
+                        # short perk name
+                        pname = (pname[:28] + u" Mark") if len(pname) > 28 else (pname + u" Mark")
+                        eff['perk_add'] = {
+                            "name": pname,
+                            "desc": u"Earned at the end of '%s' by choosing: %s." % (qtitle, ctext),
+                            "type": "allure" if sp >= 0 else "confidence",
+                            "add": 5,
+                        }
+                ch['effects'] = eff
+        tree['steps'] = steps
+        return tree
+
+    def ai_normalize_quest_tree(data):
+        """Приводит дерево квеста к стабильной схеме steps[] + choices[].next_step."""
+        if not ai_dict_like(data):
+            return None
+
+        # иногда модель кладёт дерево внутрь event/quest/data
+        if 'steps' not in data:
+            for k in ('quest', 'event', 'data', 'result', 'chain'):
+                inner = data.get(k)
+                if ai_dict_like(inner) and inner.get('steps'):
+                    data = inner
+                    break
+
+        steps = data.get('steps') or data.get('Stages') or data.get('stages') or []
+        if not steps and ai_dict_like(data.get('tree')):
+            steps = data.get('tree')
+        if not isinstance(steps, (list, tuple)) or len(steps) < 2:
+            return None
+
+        title = ai_to_text(data.get('title') or data.get('Title') or data.get('name') or u'Quest Chain', u'Quest Chain')
+        desc = ai_to_text(data.get('description') or data.get('Description') or data.get('desc') or u'', u'')
+        if not desc or desc.strip() in [u'', u'...', u'None']:
+            desc = u"A multi-step femininity training challenge for Samantha."
+
+        norm_steps = []
+        used_ids = set()
+        for i, step in enumerate(list(steps)[:AI_FULL_QUEST_MAX_STEPS]):
+            if not ai_dict_like(step):
+                continue
+            sid = ai_to_text(step.get('id') or step.get('step_id') or step.get('name') or ("step%d" % (i+1)), "step%d" % (i+1))
+            sid = sid.strip().replace(' ', '_')
+            if not sid or sid in used_ids:
+                sid = "step%d" % (i+1)
+            used_ids.add(sid)
+
+            st_title = ai_to_text(step.get('title') or step.get('Title') or sid, sid)
+            st_desc = ai_to_text(step.get('description') or step.get('Description') or step.get('desc') or u'', u'')
+            if not st_title or st_title.strip() in [u'', u'...', u'Step1', u'step1']:
+                st_title = u"Stage %d" % (i+1)
+            if not st_desc or st_desc.strip() in [u'', u'...', u'None']:
+                st_desc = u"Stage %d of Samantha's challenge continues. She must choose how to proceed." % (i+1)
+
+            outfit = step.get('outfit_suggestion') or step.get('outfit') or {}
+            if not ai_dict_like(outfit):
+                outfit = {"items": [], "reason": ""}
+            else:
+                if 'items' not in outfit:
+                    outfit = {"items": outfit.get('items', []) or [], "reason": outfit.get('reason', '')}
+
+            raw_choices = step.get('choices') or step.get('options') or step.get('actions') or []
+            if not isinstance(raw_choices, (list, tuple)):
+                raw_choices = []
+            norm_choices = []
+            for ch in list(raw_choices)[:3]:
+                if ai_dict_like(ch):
+                    ct = ai_to_text(ch.get('text') or ch.get('Text') or ch.get('label') or ch.get('choice') or u'Continue', u'Continue')
+                    if not ct or ct.strip() in [u'', u'...', u'None', u'choice1', u'choice2']:
+                        ct = u"Continue"
+                    ns = ch.get('next_step', ch.get('next', ch.get('goto', ch.get('nextStep', None))))
+                    if ns is not None:
+                        ns = ai_to_text(ns, u'').strip()
+                        if ns.lower() in [u'', u'null', u'none', u'end', u'finish', u'done']:
+                            ns = None
+                    eff = ch.get('effects') or ch.get('Effects') or {}
+                    if not ai_dict_like(eff):
+                        eff = {}
+                    # preserve ending payload + root-level perk_add
+                    if not ai_dict_like(eff):
+                        eff = {}
+                    else:
+                        try:
+                            eff = dict(eff)
+                        except Exception:
+                            pass
+                    if 'perk_add' not in eff and ch.get('perk_add') is not None:
+                        eff['perk_add'] = ch.get('perk_add')
+                    norm_choices.append({
+                        "text": ct,
+                        "effects": eff,
+                        "next_step": ns,
+                        "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)) or 0,
+                        "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
+                        "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
+                        "is_ending": bool(ch.get('is_ending', False) or (ns is None)),
+                    })
+                else:
+                    norm_choices.append({"text": ai_to_text(ch, u'Continue'), "effects": {}, "next_step": None, "spicy_modifier": 0})
+
+            if not norm_choices:
+                norm_choices = [{"text": u"Continue", "effects": {}, "next_step": None, "spicy_modifier": 0}]
+
+            norm_steps.append({
+                "id": sid,
+                "title": st_title,
+                "description": st_desc,
+                "outfit_suggestion": outfit,
+                "choices": norm_choices,
+                "tags": step.get('tags', []) or [],
+            })
+
+        if len(norm_steps) < 2:
+            return None
+
+        # Починить битые next_step: если указан несуществующий id — вести на следующий по порядку.
+        id_list = [s['id'] for s in norm_steps]
+        id_set = set(id_list)
+        for idx, step in enumerate(norm_steps):
+            is_last = (idx >= len(norm_steps) - 1)
+            default_next = None if is_last else id_list[idx + 1]
+            for ch in step['choices']:
+                ns = ch.get('next_step')
+                if ns and ns not in id_set:
+                    # fuzzy: step2 / Step 2 / 2
+                    fixed = None
+                    nslow = unicode(ns).lower().replace(' ', '')
+                    for cand in id_list:
+                        if unicode(cand).lower().replace(' ', '') == nslow:
+                            fixed = cand
+                            break
+                    ch['next_step'] = fixed if fixed else default_next
+                elif not ns:
+                    # На не-последних шагах пустой next_step = линейное продолжение
+                    ch['next_step'] = default_next
+
+        # Гарантируем, что с первого шага есть хотя бы один путь дальше
+        first = norm_steps[0]
+        if not any(ch.get('next_step') for ch in first['choices']) and len(norm_steps) > 1:
+            first['choices'][0]['next_step'] = norm_steps[1]['id']
+
+        tree = {
+            "title": title,
+            "description": desc,
+            "steps": norm_steps,
+        }
+        return ai_ensure_terminal_endings(tree)
+
+    def ai_step_to_event(full_q, step, spicy_level=2):
+        """Первый/следующий шаг дерева -> event dict для UI."""
+        if not ai_dict_like(full_q) or not ai_dict_like(step):
+            return None
+        step_ids = [s.get('id') for s in full_q.get('steps', []) if ai_dict_like(s)]
+        try:
+            step_no = step_ids.index(step.get('id')) + 1 if step.get('id') in step_ids else 1
+        except Exception:
+            step_no = 1
+        total = len(step_ids) or len(full_q.get('steps', []) or [])
+        qdesc = ai_to_text(full_q.get('description', u''), u'')
+        stage_txt = u"[Stage %s/%s]" % (step_no, total)
+        if qdesc:
+            qdesc = qdesc + u" " + stage_txt
+        else:
+            qdesc = stage_txt
+        evt = {
+            "title": step.get('title', 'Quest'),
+            "description": step.get('description', ''),
+            "type": "quest",
+            "outfit_suggestion": step.get('outfit_suggestion', {}) or {"items": []},
+            "is_quest": True,
+            "quest_title": full_q.get('title', 'Quest'),
+            "quest_desc": qdesc,
+            "choices": step.get('choices', []) or [],
+            "_full_quest": True,
+            "_step_id": step.get('id', 'step1'),
+            "_step_no": step_no,
+            "_step_total": total,
+            "tags": step.get('tags', []) or ["femininity"],
+            "spicy_level": spicy_level,
+        }
+        return ai_normalize_event(evt)
+
+    def ai_make_local_quest_tree(gs):
+        """Локальное 3-шаговое дерево, если Ollama/JSON не вывезли. Чтобы игрок НЕ видел одношаговый Mirror."""
+        loc = ai_to_text(gs.get('location', u'home'), u'home')
+        fem = gs.get('fem', 25)
+        outfit = ai_to_text(gs.get('outfit', u'casual clothes'), u'casual clothes')
+        timeofday = ai_to_text(gs.get('timeofday', u'day'), u'day')
+        title = u"Local Challenge: %s" % loc
+        desc = u"A practical femininity challenge based on where Samantha is right now."
+        step1 = {
+            "id": "step1",
+            "title": u"Opening Move",
+            "description": u"You are at %s during %s, femininity %s%%, wearing %s. A small public-private dare forms in your mind." % (loc, timeofday, fem, outfit),
+            "outfit_suggestion": {"items": ["item_top_22", "item_bottom_15"], "reason": "look more feminine"},
+            "choices": [
+                {"text": u"Take the bold dare", "next_step": "step2a", "effects": {"femininity": 2}, "spicy_modifier": 6},
+                {"text": u"Take the careful dare", "next_step": "step2b", "effects": {"confidence": 1}, "spicy_modifier": -2},
+            ],
+            "tags": ["femininity", "crossdressing"],
+        }
+        step2a = {
+            "id": "step2a",
+            "title": u"Bold Path",
+            "description": u"You push the dare further. Someone nearby notices, or you imagine they do, and your body reacts.",
+            "choices": [
+                {"text": u"Commit fully", "next_step": "end_bold", "effects": {"femininity": 2, "corrupt": 1}, "spicy_modifier": 8},
+                {"text": u"Pull back a little", "next_step": "end_soft", "effects": {"confidence": 1}, "spicy_modifier": 0},
+            ],
+        }
+        step2b = {
+            "id": "step2b",
+            "title": u"Careful Path",
+            "description": u"You keep the challenge controlled. Still feminine, still risky, but safer.",
+            "choices": [
+                {"text": u"Finish the soft challenge", "next_step": "end_soft", "effects": {"femininity": 2}, "spicy_modifier": 1},
+                {"text": u"Abort early", "next_step": "end_bail", "effects": {"confidence": -1}, "spicy_modifier": -6},
+            ],
+        }
+        end_bold = {
+            "id": "end_bold",
+            "title": u"Bold Payoff",
+            "description": u"The bold path peaks. Your reflection and the world around you both treat you more like a girl.",
+            "choices": [
+                {
+                    "text": u"Own the result",
+                    "next_step": None,
+                    "effects": {
+                        "femininity": 4,
+                        "corrupt": 1,
+                        "money": 20,
+                        "perk_add": {
+                            "name": u"Dared Herself",
+                            "desc": u"She finished a bold local challenge without backing down.",
+                            "type": "allure",
+                            "add": 5,
+                        },
+                    },
+                    "spicy_modifier": 6,
+                    "ending_title": u"Bold Ending",
+                    "ending_text": u"You leave %s hotter and more shameless. The dare is over, but the habit is not." % loc,
+                    "is_ending": True,
+                }
+            ],
+        }
+        end_soft = {
+            "id": "end_soft",
+            "title": u"Soft Payoff",
+            "description": u"You complete the challenge with poise instead of scandal.",
+            "choices": [
+                {
+                    "text": u"Accept the quiet win",
+                    "next_step": None,
+                    "effects": {
+                        "femininity": 3,
+                        "confidence": 2,
+                        "perk_add": {
+                            "name": u"Composed Girl",
+                            "desc": u"She can stay feminine under pressure without panicking.",
+                            "type": "confidence",
+                            "add": 4,
+                        },
+                    },
+                    "spicy_modifier": 1,
+                    "ending_title": u"Soft Ending",
+                    "ending_text": u"No disaster, just progress. At %s you practiced being a girl and it stuck." % loc,
+                    "is_ending": True,
+                }
+            ],
+        }
+        end_bail = {
+            "id": "end_bail",
+            "title": u"Escape",
+            "description": u"You cut the challenge short before it becomes too much.",
+            "choices": [
+                {
+                    "text": u"Leave and reset",
+                    "next_step": None,
+                    "effects": {"confidence": 1, "femininity": 1},
+                    "spicy_modifier": -4,
+                    "ending_title": u"Bail Ending",
+                    "ending_text": u"You escape the pressure at %s. Relief first, then a small sting of unfinished training." % loc,
+                    "is_ending": True,
+                }
+            ],
+        }
+        tree = {
+            "title": title,
+            "description": desc,
+            "steps": [step1, step2a, step2b, end_bold, end_soft, end_bail],
+            "_local_fallback": True,
+        }
+        return ai_ensure_terminal_endings(tree)
+
+    def generate_full_quest(gs):
+        """Генерирует дерево. Несколько попыток + локальный fallback."""
+        recent_acts = " / ".join(getattr(store, 'ai_recent_actions', [])[-4:]) if getattr(store, 'ai_recent_actions', []) else "None"
+        loc_desc = ai_get_location_description(gs['location'])
+        spicy_level = gs.get('spicy_level', 2)
+        is_spicy = gs.get('is_spicy', False)
+        allowed_tags = gs.get('allowed_tags', 'femininity, crossdressing')
+
+        compact_user = (
+            "Make a compact JSON quest TREE for Samantha now. "
+            "loc=%s (%s); fem=%s; conf=%s; outfit=%s; time=%s; spicy=%s; tags=%s; recent=%s. "
+            "Need step1, two mid branches, and 2-3 ending steps. "
+            "Terminal choices: next_step null + ending_title + ending_text + effects (+ optional perk_add). "
+            "Only JSON."
+        ) % (
+            gs.get('location', 'home'), loc_desc, gs.get('fem', 25), gs.get('confidence', 35),
+            gs.get('outfit', ''), gs.get('timeofday', ''), spicy_level, allowed_tags, recent_acts
+        )
+
+        attempts = [
+            # 1) compact + format json
+            dict(sys_prompt=PROMPTS.get("event_full_compact", PROMPTS["event_full"]), user=compact_user, temp=0.55, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=True, label=u"tree-compact-json"),
+            # 2) compact without format json (weak GGUF sometimes empty with format=json)
+            dict(sys_prompt=PROMPTS.get("event_full_compact", PROMPTS["event_full"]), user=compact_user + " Return raw JSON object only.", temp=0.45, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"tree-compact-raw"),
+            # 3) full prompt last try, smaller tokens
+            dict(sys_prompt=PROMPTS["event_full"], user=compact_user, temp=0.5, max_tokens=min(700, AI_FULL_QUEST_MAX_TOKENS), force_json_format=True, label=u"tree-full-json"),
+        ]
+
+        last_err = u""
+        for i, att in enumerate(attempts):
+            try:
+                store.ai_notify_queue.append(u"ИИ: Генерация дерева (%s) %s/%s..." % (att['label'], i+1, len(attempts)))
+            except Exception:
+                pass
+            try:
+                data = ai_call(
+                    OLLAMA_MODEL_JSON,
+                    att['sys_prompt'],
+                    att['user'],
+                    want_json=True,
+                    temp=att['temp'],
+                    max_tokens=att['max_tokens'],
+                    task_desc=u"Цепочка квестов (%s)" % att['label'],
+                    timeout=AI_FULL_QUEST_TIMEOUT,
+                    force_json_format=att['force_json_format'],
+                )
+                if isinstance(data, basestring) and data.startswith("__ERROR"):
+                    last_err = data
+                    ai_set_event_debug(u"Full quest attempt failed: %s -> %s" % (att['label'], data), raw=getattr(store, 'ai_debug_last_json_raw', u''))
+                    continue
+                tree = ai_normalize_quest_tree(data)
+                if tree and len(tree.get('steps', [])) >= 2:
+                    ai_set_event_debug(
+                        u"Full quest tree OK via %s (%s steps)" % (att['label'], len(tree.get('steps', []))),
+                        parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False},
+                    )
+                    return tree
+                last_err = u"normalize failed or <2 steps for %s" % att['label']
+                ai_set_event_debug(u"Full quest normalize fail: %s" % last_err, parsed=data)
+            except Exception as e:
+                last_err = unicode(e)
+                print("full quest attempt err %s: %s" % (att['label'], e))
+                ai_set_event_debug(u"Full quest exception in %s: %s" % (att['label'], e))
+
+        # Локальный fallback — лучше, чем одношаговый Mirror
+        print("full quest all attempts failed (%s), using local tree" % last_err)
+        tree = ai_make_local_quest_tree(gs)
+        ai_set_event_debug(
+            u"Using LOCAL quest tree fallback. Last LLM error: %s" % last_err,
+            parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": True},
+        )
+        try:
+            store.ai_notify_queue.append(u"ИИ: LLM-дерево не собралось, использован локальный квест-шаблон")
+        except Exception:
+            pass
+        return tree
 
     def generate_full_dialogue(npc, gs):
         try:
@@ -983,13 +1885,14 @@ Write only in English, dominant, dirty, short, commanding.
 """,
         "event": """You are TheFixer Event Generator.
 Return ONLY ONE valid JSON object. No markdown. No prose outside JSON.
-Schema:
-{"title":"...","description":"...","type":"femininity/social/corruption/work/horny/institute","tags":["femininity"],"outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"..."},"is_quest":false,"quest_title":"","quest_desc":"","choices":[{"text":"...","effects":{"femininity":2},"spicy_modifier":0},{"text":"...","effects":{"confidence":1},"spicy_modifier":-5}]}
+Schema example (replace ALL sample strings with real content, NEVER copy placeholders):
+{"title":"Mirror Practice","description":"You catch your reflection and force a feminine smile. A small dare forms in your mind.","type":"femininity","tags":["femininity","crossdressing"],"outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"train a slutty silhouette"},"is_quest":false,"quest_title":"","quest_desc":"","choices":[{"text":"Pose and accept the dare","effects":{"femininity":2},"spicy_modifier":5},{"text":"Look away and leave","effects":{"confidence":1},"spicy_modifier":-5}]}
 Rules:
-- Description: 2 short English sentences.
-- Choices: exactly 2 or 3.
+- title and description MUST be real English prose, never "..." or empty.
+- each choice.text MUST be a real short English action, never "..." or empty.
+- Description: 2 short English sentences, second person ("You ...").
+- Choices: exactly 2 or 3 objects with text + effects.
 - Keep JSON compact and simple.
-- If unsure, use empty arrays/empty strings, but keep valid JSON.
 - Grounded only in TheFixer daily sissification, teasing, outfits, embarrassment, submissiveness, and local factions.
 - No mysteries, no fantasy, no puzzles, no portals.
 - If using outfit items, use real item ids like item_top_22, item_bottom_15.
@@ -1015,13 +1918,22 @@ RULES:
 """,
         "perk": "Generate new perk for TheFixer based on femininity %d%% and actions %s. JSON: {name:\"\", desc:\"\", type:\"confidence/desire/allure\", add:5, multi:1.2}. Name English, desc English. Only JSON.",
 
-        "event_full": """You are TheFixer FULL QUEST Chain Generator. Generate a FULL QUEST CHAIN as JSON with 3-4 steps. Schema: {"title": "Overall quest", "description": "overall description", "steps": [{"id": "step1", "title": "Step1", "description": "2-3 sentences", "outfit_suggestion": {"items": ["item_top_22", "item_bottom_15"], "reason": "train femininity"}, "choices": [{"text": "choice1", "next_step": "step2a", "effects": {"femininity": 3}, "spicy_modifier": 10}, {"text": "choice2", "next_step": "step2b", "spicy_modifier": -10}]}, {"id": "step2a", "title": "...", "description": "...", "choices": [{"text": "...", "next_step": "step3", "effects": {}, "spicy_modifier": 5}, {"text": "...", "next_step": null, "spicy_modifier": 0}]}, {"id": "step2b", ...}, {"id": "step3", ...}]}.
-STRICT LORE RULES & INSTRUCTIONS:
-- Read her "Active Perks/Traits" context. If she has traits like "Public Prostitute" or "Neck Cuts", make NPCs react directly to them!
-- Choices can dynamically grant new permanent perks/traits to the player inside the "effects" dictionary using the key "perk_add" as a string or detailed dictionary.
-- Do NOT generate generic mystery, adventure, or puzzle-solving quests (absolutely NO "solving puzzles", "mysterious treasures", "ancient secrets", "mysterious gathering").
-- Keep the quest chain strictly grounded in sissification, body transformation, crossdressing, modeling slutty clothes, public exhibitionism, submissiveness, and faction interaction (Wolf Pack, Mean Girls, etc.).
-- Branching at step1 is mandatory. English only. Only JSON.
+        "event_full_compact": """You are TheFixer quest-tree JSON generator.
+Return ONLY one JSON object.
+Schema:
+{"title":"Park Dare","description":"A short femininity challenge.","steps":[{"id":"step1","title":"Start","description":"You face a dare here.","choices":[{"text":"Go bold","next_step":"step2a","effects":{"femininity":2},"spicy_modifier":6},{"text":"Go careful","next_step":"step2b","effects":{"confidence":1},"spicy_modifier":-2}]},{"id":"step2a","title":"Bold","description":"You push further.","choices":[{"text":"Finish bold","next_step":"end_bold","effects":{"femininity":2},"spicy_modifier":8}]},{"id":"step2b","title":"Careful","description":"You stay controlled.","choices":[{"text":"Finish soft","next_step":"end_soft","effects":{"femininity":2},"spicy_modifier":1}]},{"id":"end_bold","title":"Bold End","description":"Payoff of the bold path.","choices":[{"text":"Own it","next_step":null,"effects":{"femininity":4,"perk_add":{"name":"Bold Girl","desc":"She finishes daring challenges.","type":"allure","add":5}},"ending_title":"Bold Ending","ending_text":"You finish shameless and more feminine."}]},{"id":"end_soft","title":"Soft End","description":"Payoff of the careful path.","choices":[{"text":"Accept it","next_step":null,"effects":{"femininity":3,"confidence":2},"ending_title":"Soft Ending","ending_text":"Quiet progress, no scandal."}]}]}
+Rules:
+- 4 to 5 steps total.
+- Branch once after step1.
+- Every terminal choice: next_step null, ending_title, ending_text, effects.
+- Optional perk_add on strong endings.
+- English only. No mystery/fantasy. Only JSON.
+""",
+        "event_full": """You are TheFixer FULL QUEST TREE Generator.
+Return ONLY ONE valid JSON object.
+Make a playable tree for Samantha with decision steps and endings.
+Each terminal choice needs: next_step null, ending_title, ending_text, effects, optional perk_add.
+Branch at least once. English. TheFixer sissification lore only. Only JSON.
 """,
         "npc_full": "You are NPC dialogue generator. Generate FULL dialogue of 4 exchanges between NPC {fname} {sname} (group {bio_group}, whore={iswhore}) and Samantha (former man, fem {fem}%%). JSON: {{\"dialogue\": [{\"role\": \"npc\", \"text\": \"...\"}, {{\"role\": \"player_options\", \"options\": [\"reply1\", \"reply2\"]}}, {{\"role\": \"npc\", \"text\": \"...\"}}, ...]}} 8 entries (4 npc, 4 player_options). English, short, NSFW ok, remember past. Only JSON.",
         "dirty_batch": "Generate 5 dirty talk phrases for sex type {sex_type} with {npc_name}, fem {fem}%%, desire {desire}%%. JSON array: [\"phrase1\", \"phrase2\", \"phrase3\", \"phrase4\", \"phrase5\"] from foreplay to cum, in order, dominant, English, NSFW explicit. Only JSON array.",
@@ -1058,6 +1970,7 @@ default ai_perks_generated = []
 # Full optimizations - prefetch all at once
 default ai_full_quest_data = None
 default ai_full_quest_current_step = "step1"
+default ai_quest_path = []
 default ai_full_dialogue_data = None
 default ai_full_dialogue_index = 0
 default ai_dirty_batch = []
@@ -1246,6 +2159,7 @@ label ai_gen_event:
     $ ai_pending_event=None
     $ ai_prefetched={}
     $ ai_full_quest_data=None
+    $ ai_quest_path=[]
     python:
         def _event_thread():
             try:
@@ -1263,66 +2177,102 @@ label ai_gen_event:
                     allowed_tags_str = "femininity, crossdressing, humiliation"
 
                 full_q = None
-                if AI_ENABLE_FULL_QUEST_CHAIN and not AI_LOW_VRAM_SAFE_MODE:
+                # Ручная генерация события: всегда пробуем ПОЛНОЕ ДЕРЕВО (3-4 стадии),
+                # даже в LOW_VRAM_SAFE_MODE. Фоновый prefetch по-прежнему режется safe mode'ом.
+                if AI_ENABLE_FULL_QUEST_CHAIN:
                     try:
                         gs['spicy_level'] = spicy_level
                         gs['is_spicy'] = is_spicy
                         gs['allowed_tags'] = allowed_tags_str
                         gs['spicy_chance'] = spicy_chance
                         full_q = generate_full_quest(gs)
-                    except:
+                        if full_q:
+                            ai_set_event_debug(u"Full quest tree generated", parsed={"title": full_q.get('title'), "steps": [s.get('id') for s in full_q.get('steps', [])]})
+                    except Exception as e:
+                        print("full quest branch err: %s" % e)
                         full_q = None
 
-                if full_q and 'steps' in full_q and len(full_q['steps'])>=2:
+                if full_q and ai_dict_like(full_q) and full_q.get('steps') and len(full_q['steps']) >= 2:
                     store.ai_full_quest_data = full_q
-                    store.ai_full_quest_current_step = full_q['steps'][0]['id']
                     first_step = full_q['steps'][0]
-                    evt={
-                        "title": first_step.get('title','Quest'),
-                        "description": first_step.get('description',''),
-                        "type": "quest",
-                        "outfit_suggestion": first_step.get('outfit_suggestion',{}),
-                        "is_quest": True,
-                        "quest_title": full_q.get('title','Quest'),
-                        "quest_desc": full_q.get('description',''),
-                        "choices": first_step.get('choices',[]),
-                        "_full_quest": True,
-                        "_step_id": first_step.get('id','step1'),
-                        "tags": first_step.get('tags',[]),
-                        "spicy_level": spicy_level
-                    }
-                    evt = ai_normalize_event(evt)
-                    ai_set_event_debug(u"Full quest step parsed successfully", parsed=evt)
+                    store.ai_full_quest_current_step = first_step.get('id', 'step1')
+                    evt = ai_step_to_event(full_q, first_step, spicy_level=spicy_level)
+                    reason = u"Full quest first step staged"
+                    if full_q.get('_local_fallback'):
+                        reason = u"LOCAL quest tree first step staged (LLM tree failed)"
+                    ai_set_event_debug(reason, parsed={
+                        "title": evt.get('title') if ai_dict_like(evt) else None,
+                        "quest_title": full_q.get('title'),
+                        "step_ids": [s.get('id') for s in full_q.get('steps', [])],
+                        "local": bool(full_q.get('_local_fallback')),
+                        "first_choices": [
+                            (c.get('text') if ai_dict_like(c) else unicode(c))
+                            for c in (evt.get('choices', []) if ai_dict_like(evt) else [])
+                        ],
+                    })
                     if not ai_filter_event_by_comfort(evt):
                         ai_set_event_debug(u"Full quest event was blocked by comfort/location filter", parsed=evt)
-                        evt={"title":"Morning","description":"You woke up, wonderful day, fem %s%%. Time %s, location %s. Try new outfit." % (gs['fem'], gs['timeofday'], gs['location']),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear it","effects":{"femininity":4}},{"text":"Don't wear","effects":{"femininity":-2}}]}
-                        evt = ai_normalize_event(evt)
-                    store.ai_pending_event=evt
+                        evt = ai_normalize_event({
+                            "title": u"Soft Start",
+                            "description": u"You take a gentler first step of the challenge. Fem %s%%, location %s." % (gs['fem'], gs['location']),
+                            "type": "femininity",
+                            "is_quest": True,
+                            "quest_title": full_q.get('title', u'Quest'),
+                            "quest_desc": full_q.get('description', u''),
+                            "outfit_suggestion": {"items": ["item_top_22", "item_bottom_15"], "reason": "train femininity"},
+                            "tags": ["femininity"],
+                            "choices": first_step.get('choices', [{"text": u"Continue", "next_step": full_q['steps'][1]['id'] if len(full_q['steps'])>1 else None, "effects": {"femininity": 2}}]),
+                            "_full_quest": True,
+                            "_step_id": first_step.get('id', 'step1'),
+                        })
+                    store.ai_pending_event = evt
                 else:
-                    prompt="fem=%s%% conf=%s loc=%s outfit=%s perks=%s hour=%s timeofday=%s spicy_level=%s/10 is_spicy=%s allowed_tags=%s inventory=%s quests=%s. Generate ONE short grounded event with 2-3 choices only. Keep description concise. JSON." % (gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], spicy_level, is_spicy, allowed_tags_str, gs.get('inventory',''), gs.get('active_quests',''))
-                    evt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.35, max_tokens=AI_EVENT_MAX_TOKENS, task_desc=u"Событие для " + gs.get('location','home'))
-                    if evt == "__ERROR_MODEL_NOT_FOUND__":
-                        ai_set_event_debug(u"Model not found for event generation")
-                        evt = {"title": "Error: Model Not Found", "description": "Модель ИИ '%s' не загружены. Сделайте 'ollama pull %s'" % (OLLAMA_MODEL_JSON, OLLAMA_MODEL_JSON), "choices": [{"text": "Продолжить без мода", "effects": {}}]}
-                    elif evt == "__ERROR_OLLAMA_OFFLINE__":
-                        ai_set_event_debug(u"Ollama offline during event generation")
-                        evt = {"title": "Error: Ollama Offline", "description": "Не удалось соединиться с Ollama на http://localhost:11434. Проверьте запущен ли сервер.", "choices": [{"text": "Продолжить без мода", "effects": {}}]}
-                    elif isinstance(evt, str) and evt.startswith("__ERROR_JSON__"):
-                        ai_set_event_debug(u"Event JSON parse error")
-                        evt = {"title":"AI JSON Error","description":"Ollama ответила, но прислала битый JSON. Открой ai_event_debug.txt в папке game и пришли его мне.","type":"error","outfit_suggestion":{"items":[]},"is_quest":False,"choices":[{"text":"OK","effects":{}}]}
-                    elif not evt or (isinstance(evt, str) and evt.startswith("__ERROR__")):
-                        ai_set_event_debug(u"Generic event generation fallback: invalid/empty event object")
-                        evt={"title":"Mirror","description":"Mirror reflexions: Fem %s%%. You in %s. Time is %s, location %s. Challenge ready." % (gs['fem'], gs['outfit'], gs['timeofday'], gs['location']),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear it","effects":{"femininity":4}},{"text":"Don't wear","effects":{"femininity":-2}}]}
-                    else:
-                        ai_set_event_debug(u"Event parsed successfully", parsed=evt)
-                    
-                    evt = ai_normalize_event(evt)
-                    if isinstance(evt, dict) and 'choices' in evt:
-                        if not ai_filter_event_by_comfort(evt):
-                            ai_set_event_debug(u"Event was blocked by comfort/location filter", parsed=evt)
-                            evt={"title":"Morning","description":"Wonderful day, fem %s%%. Try new outfit." % gs['fem'],"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"]},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear","effects":{"femininity":3}}]}
-                            evt = ai_normalize_event(evt)
-                    store.ai_pending_event=evt
+                    # generate_full_quest почти всегда что-то вернёт (local tree).
+                    # Если нет — только тогда single-event / error fallbacks.
+                    try:
+                        full_q = ai_make_local_quest_tree(gs)
+                        store.ai_full_quest_data = full_q
+                        first_step = full_q['steps'][0]
+                        store.ai_full_quest_current_step = first_step.get('id', 'step1')
+                        evt = ai_step_to_event(full_q, first_step, spicy_level=spicy_level)
+                        ai_set_event_debug(u"Emergency local tree used because full_q empty", parsed={
+                            "title": full_q.get('title'),
+                            "step_ids": [s.get('id') for s in full_q.get('steps', [])],
+                            "local": True,
+                        })
+                        store.ai_pending_event = evt
+                    except Exception as e:
+                        ai_set_event_debug(u"Emergency local tree failed: %s; falling back to single event" % e)
+                        prompt = "fem=%s%% conf=%s loc=%s outfit=%s perks=%s hour=%s timeofday=%s spicy_level=%s/10 is_spicy=%s allowed_tags=%s inventory=%s quests=%s. Generate ONE short grounded event with 2-3 choices only. Keep description concise. JSON." % (gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], spicy_level, is_spicy, allowed_tags_str, gs.get('inventory',''), gs.get('active_quests',''))
+                        evt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.35, max_tokens=AI_EVENT_MAX_TOKENS, task_desc=u"Событие для " + gs.get('location','home'))
+                        if evt == "__ERROR_MODEL_NOT_FOUND__":
+                            ai_set_event_debug(u"Model not found for event generation")
+                            evt = {"title": "Error: Model Not Found", "description": "Модель ИИ '%s' не загружена. Сделайте 'ollama pull %s'" % (OLLAMA_MODEL_JSON, OLLAMA_MODEL_JSON), "choices": [{"text": "Продолжить без мода", "effects": {}}]}
+                        elif evt == "__ERROR_OLLAMA_OFFLINE__":
+                            ai_set_event_debug(u"Ollama offline during event generation")
+                            evt = {"title": "Error: Ollama Offline", "description": "Не удалось соединиться с Ollama на http://localhost:11434. Проверьте запущен ли сервер.", "choices": [{"text": "Продолжить без мода", "effects": {}}]}
+                        elif isinstance(evt, str) and evt.startswith("__ERROR_JSON__"):
+                            ai_set_event_debug(u"Event JSON parse error")
+                            evt = {"title":"AI JSON Error","description":"Ollama ответила, но прислала битый JSON. Открой ai_event_debug.txt в папке game и пришли его мне.","type":"error","outfit_suggestion":{"items":[]},"is_quest":False,"choices":[{"text":"OK","effects":{}}]}
+                        elif not evt or (isinstance(evt, str) and evt.startswith("__ERROR__")):
+                            ai_set_event_debug(u"Generic event generation fallback: invalid/empty event object")
+                            # Даже здесь — local tree, а не убогий Mirror one-shot
+                            try:
+                                full_q = ai_make_local_quest_tree(gs)
+                                store.ai_full_quest_data = full_q
+                                evt = ai_step_to_event(full_q, full_q['steps'][0], spicy_level=spicy_level)
+                            except Exception:
+                                evt = {"title":"Challenge","description":"You face a small femininity challenge at %s. Fem %s%%." % (gs.get('location','home'), gs.get('fem',25)),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":True,"tags":["femininity"],"choices":[{"text":"Accept","effects":{"femininity":3}},{"text":"Refuse","effects":{"confidence":1}}]}
+                        else:
+                            ai_set_event_debug(u"Event parsed successfully", parsed=evt)
+                        evt = ai_normalize_event(evt)
+                        if ai_dict_like(evt) and 'choices' in evt:
+                            if not ai_filter_event_by_comfort(evt):
+                                ai_set_event_debug(u"Event was blocked by comfort/location filter", parsed=evt)
+                                evt = {"title":"Morning","description":"Wonderful day, fem %s%%. Try new outfit." % gs['fem'],"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"]},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear","effects":{"femininity":3}}]}
+                                evt = ai_normalize_event(evt)
+                        store.ai_pending_event = evt
+
             except Exception as e:
                 ai_set_event_debug(u"Unhandled exception in event thread: %s" % e)
                 store.ai_pending_event=ai_normalize_event({"title":"Error","description":"Institute offline: %s" % e,"type":"error","outfit_suggestion":{"items":[]},"is_quest":False,"choices":[{"text":"OK","effects":{}}]})
@@ -1352,28 +2302,47 @@ screen ai_event_loading_screen():
 label ai_event_poll:
     if ai_pending_event is not None:
         python:
-            evt=ai_pending_event
-            if isinstance(evt, dict):
-                evt = ai_normalize_event(evt)
-                if evt.get('outfit_suggestion',{}).get('items'):
-                    auto_equip(evt['outfit_suggestion']['items'])
-                if evt.get('npc_involved',{}).get('generate_new'):
-                    spawn_npc(evt['npc_involved'])
-                store.ai_last_event = evt
-                store.ai_event_ui_cache = evt
-                store.ai_event_title = unicode(evt.get('title', u'Событие'))
-                store.ai_event_desc = unicode(evt.get('description', u'...'))
-                store.ai_event_choices = evt.get('choices', [])
-                store.ai_event_outfit_items = evt.get('outfit_suggestion',{}).get('items',[])
-                store.ai_event_is_quest = evt.get('is_quest', False)
-                store.ai_event_qtitle = unicode(evt.get('quest_title', u''))
-                store.ai_event_qdesc = unicode(evt.get('quest_desc', u''))
-                ai_set_event_debug(u"Final event staged for UI", parsed={"title": store.ai_event_title, "description": store.ai_event_desc, "choices": store.ai_event_choices})
-                ai_events.append(evt)
-                if evt.get('is_quest'):
-                    ai_quests.append({"title":evt.get('quest_title',evt['title']),"desc":evt.get('quest_desc',evt['description']),"outfit":evt.get('outfit_suggestion'),"status":"active","rewards":{"femininity":6,"money":150}})
-            ai_pending_event=None
-            ai_event_thinking=False
+            evt = ai_pending_event
+            try:
+                evt = ai_stage_event_for_ui(evt, reason=u"Final event staged for UI (poll)")
+                try:
+                    if ai_dict_like(evt) and ai_dict_like(evt.get('outfit_suggestion', {})) and evt.get('outfit_suggestion', {}).get('items'):
+                        auto_equip(evt['outfit_suggestion']['items'])
+                except Exception as e:
+                    print("auto_equip err: %s" % e)
+                try:
+                    if ai_dict_like(evt) and ai_dict_like(evt.get('npc_involved', {})) and evt.get('npc_involved', {}).get('generate_new'):
+                        spawn_npc(evt['npc_involved'])
+                except Exception as e:
+                    print("spawn_npc err: %s" % e)
+                try:
+                    ai_events.append(evt)
+                except Exception as e:
+                    print("ai_events append err: %s" % e)
+                try:
+                    if ai_dict_like(evt) and evt.get('is_quest'):
+                        ai_quests.append({
+                            "title": evt.get('quest_title', evt.get('title')),
+                            "desc": evt.get('quest_desc', evt.get('description')),
+                            "outfit": evt.get('outfit_suggestion'),
+                            "status": "active",
+                            "rewards": {"femininity": 6, "money": 150},
+                        })
+                except Exception as e:
+                    print("ai_quests append err: %s" % e)
+            except Exception as e:
+                print("ai_event_poll staging FATAL: %s" % e)
+                try:
+                    ai_stage_event_for_ui({
+                        "title": u"UI Staging Error",
+                        "description": u"Событие пришло, но UI staging упал: %s. Смотри ai_event_debug.txt / log." % e,
+                        "choices": [{"text": u"OK", "effects": {}}],
+                        "is_quest": False,
+                    }, reason=u"poll staging fatal: %s" % e)
+                except Exception as e2:
+                    print("ai_event_poll fallback also failed: %s" % e2)
+            ai_pending_event = None
+            ai_event_thinking = False
             
             # Фоновая предзагрузка следующих выборов
             if not AI_LOW_VRAM_SAFE_MODE:
@@ -1394,7 +2363,7 @@ label ai_event_poll:
                                 print("Prefetched choice %s: %s" % (choice_idx, next_evt.get('title','')))
                         except Exception as e:
                             print("Prefetch error %s" % e)
-                    if isinstance(evt, dict) and 'choices' in evt:
+                    if ai_dict_like(evt) and 'choices' in evt:
                         for idx, ch in enumerate(evt.get('choices',[])[:3]):
                             ctext=ch.get('text','') if hasattr(ch, 'get') else str(ch)
                             import threading
@@ -1409,6 +2378,89 @@ screen ai_event_screen(evt_obj=None):
     modal True
     zorder 3000
     add Solid("#000000dd")
+
+    # Локальный snapshot события: параметр экрана > ui_cache > last_event > store fields
+    default _ui_title = u"Событие"
+    default _ui_desc = u"..."
+    default _ui_choices = []
+    default _ui_is_quest = False
+    default _ui_qtitle = u""
+    default _ui_qdesc = u""
+    default _ui_outfit = u"Нет"
+    default _ui_corrupt = 0
+
+    python:
+        try:
+            _src = evt_obj
+            if _src is None:
+                _src = getattr(store, 'ai_event_ui_cache', None)
+            if _src is None:
+                _src = getattr(store, 'ai_last_event', None)
+
+            if _src is not None and hasattr(_src, 'get'):
+                _ui_title = ai_escape_renpy_text(ai_to_text(_src.get('title', getattr(store, 'ai_event_title', u'Событие')), u'Событие'))
+                _ui_desc = ai_escape_renpy_text(ai_to_text(_src.get('description', getattr(store, 'ai_event_desc', u'...')), u'...'))
+                _ui_choices = list(_src.get('choices', getattr(store, 'ai_event_choices', [])) or [])
+                _ui_is_quest = bool(_src.get('is_quest', getattr(store, 'ai_event_is_quest', False)))
+                _ui_qtitle = ai_escape_renpy_text(ai_to_text(_src.get('quest_title', getattr(store, 'ai_event_qtitle', u'')), u''))
+                _ui_qdesc = ai_escape_renpy_text(ai_to_text(_src.get('quest_desc', getattr(store, 'ai_event_qdesc', u'')), u''))
+                _items = []
+                try:
+                    _os = _src.get('outfit_suggestion', {}) or {}
+                    if hasattr(_os, 'get'):
+                        _items = _os.get('items', []) or []
+                except:
+                    _items = getattr(store, 'ai_event_outfit_items', []) or []
+            else:
+                _ui_title = ai_escape_renpy_text(ai_to_text(getattr(store, 'ai_event_title', u'Событие'), u'Событие'))
+                _ui_desc = ai_escape_renpy_text(ai_to_text(getattr(store, 'ai_event_desc', u'...'), u'...'))
+                _ui_choices = list(getattr(store, 'ai_event_choices', []) or [])
+                _ui_is_quest = bool(getattr(store, 'ai_event_is_quest', False))
+                _ui_qtitle = ai_escape_renpy_text(ai_to_text(getattr(store, 'ai_event_qtitle', u''), u''))
+                _ui_qdesc = ai_escape_renpy_text(ai_to_text(getattr(store, 'ai_event_qdesc', u''), u''))
+                _items = getattr(store, 'ai_event_outfit_items', []) or []
+
+            if not _ui_desc or unicode(_ui_desc).strip() in [u"", u"...", u"[[...]]"]:
+                # если после escape всё ещё пусто/плейсхолдер — покажем debug-подсказку
+                _raw = getattr(store, 'ai_debug_last_json_raw', u'') or u''
+                _reason = getattr(store, 'ai_debug_last_event_reason', u'') or u''
+                if _raw:
+                    _ui_desc = ai_escape_renpy_text(u"[DEBUG] LLM raw received but UI text empty. reason=%s | raw[:240]=%s" % (_reason, unicode(_raw)[:240]))
+                else:
+                    _ui_desc = ai_escape_renpy_text(u"[DEBUG] Event object empty. reason=%s. Check ai_event_debug.txt in game folder." % _reason)
+
+            _names = []
+            for iid in (_items or []):
+                try:
+                    clean_id = iid.split()[0] if isinstance(iid, basestring) and ' ' in iid else iid
+                    obj = getattr(store, clean_id, None)
+                    if obj and hasattr(obj, 'name'):
+                        _names.append(obj.name)
+                    else:
+                        if isinstance(iid, basestring) and ' ' in iid:
+                            _names.append(iid.split(' ', 1)[1])
+                        else:
+                            _names.append(unicode(clean_id))
+                except:
+                    _names.append(unicode(iid))
+            _ui_outfit = ai_escape_renpy_text(u", ".join(_names) if _names else u"Нет")
+
+            _ui_corrupt = 0
+            try:
+                if hasattr(player, 'corrupt'):
+                    _ui_corrupt = player.corrupt
+            except:
+                _ui_corrupt = 0
+        except Exception as e:
+            _ui_title = u"UI Error"
+            _ui_desc = ai_escape_renpy_text(u"Screen render error: %s" % e)
+            _ui_choices = [{"text": u"Close", "effects": {}}]
+            _ui_is_quest = False
+            _ui_qtitle = u""
+            _ui_qdesc = u""
+            _ui_outfit = u"Нет"
+            _ui_corrupt = 0
+
     frame:
         xalign 0.5 yalign 0.5
         xsize 850 ysize 850
@@ -1434,64 +2486,29 @@ screen ai_event_screen(evt_obj=None):
                                 text "Саманта [ai_fem]%" xalign 0.5 color "#ff88cc"
                     frame:
                         background "#1a1a2a" xfill True ysize 80
-                        python:
-                            _corrupt_val = 0
-                            _outfit_display = "Нет"
-                            try:
-                                if hasattr(player, 'corrupt'):
-                                    _corrupt_val = player.corrupt
-                            except:
-                                _corrupt_val = 0
-                            try:
-                                outfit_items = getattr(store, 'ai_event_outfit_items', [])
-                                _names = []
-                                for iid in outfit_items:
-                                    try:
-                                        clean_id = iid.split()[0] if ' ' in iid else iid
-                                        obj = getattr(store, clean_id, None)
-                                        if obj and hasattr(obj, 'name'):
-                                            _names.append(obj.name)
-                                        else:
-                                            if ' ' in iid:
-                                                _names.append(iid.split(' ',1)[1])
-                                            else:
-                                                _names.append(clean_id)
-                                    except:
-                                        _names.append(iid)
-                                _outfit_display = ", ".join(_names) if _names else "Нет"
-                            except:
-                                _outfit_display = "Ошибка"
-                            _outfit_display = ai_escape_renpy_text(_outfit_display)
                         vbox:
-                            text "Фем:[ai_fem]% Corr:[_corrupt_val]" size 11 color "#aaa"
-                            text "Надето: [_outfit_display]" size 10 color "#ffaa44"
+                            text "Фем:[ai_fem]% Corr:[_ui_corrupt]" size 11 color "#aaa"
+                            text "Надето: [_ui_outfit]" size 10 color "#ffaa44"
             frame:
                 xsize 470 yfill True background "#12121a"
                 vbox:
                     xfill True yfill True
                     frame:
                         background "#2a1a3a" xfill True ysize 60
-                        python:
-                            _evt_title = ai_escape_renpy_text(getattr(store, 'ai_event_title', u'Событие'))
                         vbox:
-                            text "[_evt_title]" size 18 bold True color "#ff88cc"
+                            text "[_ui_title]" size 18 bold True color "#ff88cc"
                     frame:
                         background "#1a1a2a" xfill True yfill True
                         viewport:
                             scrollbars "vertical" mousewheel True
                             vbox:
-                                python:
-                                    _evt_desc = ai_escape_renpy_text(getattr(store, 'ai_event_desc', u'...'))
-                                text "[_evt_desc]" size 16 color "#e0e0ff"
-                                if getattr(store, 'ai_event_is_quest', False):
+                                text "[_ui_desc]" size 16 color "#e0e0ff"
+                                if _ui_is_quest:
                                     frame:
                                         background "#0a2a0a"
-                                        python:
-                                            _q_title = ai_escape_renpy_text(getattr(store, 'ai_event_qtitle', u''))
-                                            _q_desc = ai_escape_renpy_text(getattr(store, 'ai_event_qdesc', u''))
                                         vbox:
-                                            text "Квест: [_q_title]" size 12 color "#88ff88"
-                                            text "[_q_desc]" size 12 color "#88ff88"
+                                            text "Квест: [_ui_qtitle]" size 12 color "#88ff88"
+                                            text "[_ui_qdesc]" size 12 color "#88ff88"
                     frame:
                         background "#0f0f1a" xfill True ysize 340
                         viewport:
@@ -1501,15 +2518,23 @@ screen ai_event_screen(evt_obj=None):
                                 xfill True
                                 spacing 8
                                 yalign 1.0
-                                for idx, ch in enumerate(getattr(store, 'ai_event_choices', [])[:3]):
-                                    python:
-                                        _choice_txt = "..."
-                                        try:
-                                            _choice_txt = ch.get('text','...') if hasattr(ch, 'get') else str(ch)
-                                        except:
-                                            _choice_txt = "..."
-                                        _choice_txt = ai_escape_renpy_text(_choice_txt)
-                                    textbutton "[_choice_txt]" action Return(idx) xfill True background "#2a2a4a" hover_background "#4a2a6a" text_size 14
+                                if _ui_choices:
+                                    for idx, ch in enumerate(_ui_choices[:3]):
+                                        python:
+                                            _choice_txt = u"..."
+                                            try:
+                                                if hasattr(ch, 'get'):
+                                                    _choice_txt = ai_to_text(ch.get('text', u'...'), u'...')
+                                                else:
+                                                    _choice_txt = ai_to_text(ch, u'...')
+                                            except:
+                                                _choice_txt = u"..."
+                                            if not _choice_txt or unicode(_choice_txt).strip() in [u"", u"...", u"None"]:
+                                                _choice_txt = u"Continue"
+                                            _choice_txt = ai_escape_renpy_text(_choice_txt)
+                                        textbutton "[_choice_txt]" action Return(idx) xfill True background "#2a2a4a" hover_background "#4a2a6a" text_size 14
+                                else:
+                                    textbutton "Continue" action Return(0) xfill True background "#2a2a4a" hover_background "#4a2a6a" text_size 14
                                 textbutton "Пропустить" action Return(-1) xfill True background "#1a1a1a" text_size 12
 
 label ai_event_choice:
@@ -1532,135 +2557,160 @@ label ai_event_choice:
                 _cur_evt = getattr(store, 'ai_last_event', None)
             _choices = getattr(store, 'ai_event_choices', None) or (_cur_evt.get('choices',[]) if _cur_evt else [])
             ch = _choices[event_choice_result] if _choices and event_choice_result < len(_choices) else {}
-            eff = ch.get('effects',{}) if hasattr(ch, 'get') else {}
-            p=player
-            if 'confidence' in eff:
-                try: p.add_conf(int(eff['confidence']))
-                except: p._confidence=max(0,min(100,p._confidence+int(eff['confidence'])))
-            if 'femininity' in eff: ai_fem=max(0,min(100,ai_fem+int(eff['femininity'])))
-            if 'corrupt' in eff and hasattr(p,'corrupt'): p.corrupt=max(0,p.corrupt+int(eff['corrupt']))
-            if 'money' in eff:
-                try:
-                    if int(eff['money'])>=0: p.add_money(int(eff['money']))
-                    else: p.remove_money(abs(int(eff['money'])))
-                except: pass
-            if 'give_item' in eff:
-                try:
-                    item_obj=getattr(store, eff['give_item'], None)
-                    if item_obj and hasattr(store,'inv'): store.inv.add(item_obj)
-                except: pass
 
-            # ДИНАМИЧЕСКИЙ ДИЛОГОВЫЙ SPICY-МОДИФИКАТОР!
-            # Изменение Spicy-метра на основе выбранного игроком варианта ответа
-            spicy_mod = ch.get('spicy_modifier', 0) if hasattr(ch, 'get') else 0
-            if spicy_mod:
-                store.ai_spicy_meter = max(0, min(100, getattr(store, 'ai_spicy_meter', 20) + int(spicy_mod)))
-                store.ai_notify_queue.append(u"ИИ: Spicy метр изменен на %+d%% за твой выбор!" % int(spicy_mod))
-
-            # Динамическое создание ПЕРКОВ из выборов ИИ-событий в сейв-файл GG
-            if 'perk_add' in eff:
-                p_add = eff['perk_add']
-                if p_add:
-                    p_name = ""
-                    p_desc = None
-                    p_type = "allure"
-                    p_val = 5
-                    if hasattr(p_add, 'get'):
-                        p_name = p_add.get('name', 'Marked')
-                        p_desc = p_add.get('desc')
-                        p_type = p_add.get('type', 'allure')
-                        p_val = int(p_add.get('add', 5))
-                    else:
-                        p_name = unicode(p_add)
-                    if p_name:
-                        ai_add_dynamic_perk(p_name, p_desc, p_type, p_val)
-
-            # Запоминаем выбор во взаимоотношениях с персонажем (ДОЛГОСРОЧНАЯ ПАМЯТЬ)
-            if _cur_evt and _cur_evt.get('npc_involved'):
-                npc_info = _cur_evt['npc_involved']
-                npc_fname = npc_info.get('fname', '').lower()
-                if npc_fname:
-                    choice_text = ch.get('text', 'completed action')
-                    memory_entry = u"Samantha chose: '%s' during event: '%s' (%s)" % (choice_text, _cur_evt.get('title'), _cur_evt.get('description')[:120])
-                    if npc_fname not in store.ai_npc_memories:
-                        store.ai_npc_memories[npc_fname] = []
-                    store.ai_npc_memories[npc_fname].append(memory_entry)
-                    # Храним только последние 10 записей памяти во избежание раздувания сейвов
-                    store.ai_npc_memories[npc_fname] = store.ai_npc_memories[npc_fname][-10:]
-                    print("Saved relationship memory for %s: %s" % (npc_fname, memory_entry))
-
-            next_evt = None
-
-            # 1. Полно-цепочечные квесты
-            try:
-                if ai_full_quest_data and 'steps' in ai_full_quest_data:
-                    next_step_id = ch.get('next_step') if hasattr(ch, 'get') else None
-                    if next_step_id:
-                        for step in ai_full_quest_data['steps']:
-                            if step.get('id') == next_step_id:
-                                next_evt = {
-                                    "title": step.get('title',''),
-                                    "description": step.get('description',''),
-                                    "type": "quest",
-                                    "outfit_suggestion": step.get('outfit_suggestion',{}),
-                                    "is_quest": True,
-                                    "choices": step.get('choices',[]),
-                                    "_full_quest": True,
-                                    "_step_id": step.get('id')
-                                }
-                                break
-            except Exception as e:
-                print("Full quest next step err %s" % e)
-
-            # 2. Обычные предзагруженные шаги
-            if not next_evt:
-                next_evt = store.ai_prefetched.get(event_choice_result) if hasattr(store,'ai_prefetched') else None
-
-            if next_evt:
-                next_evt = ai_normalize_event(next_evt) # Нормализуем перед использованием!
-                print("Using next event (full quest or prefetched) for choice %s" % event_choice_result)
-                if next_evt.get('outfit_suggestion',{}).get('items'):
-                    auto_equip(next_evt['outfit_suggestion']['items'])
-                store.ai_last_event=next_evt
-                store.ai_event_ui_cache=next_evt
-                store.ai_event_title = unicode(next_evt.get('title', u'Событие'))
-                store.ai_event_desc = unicode(next_evt.get('description', u'...'))
-                store.ai_event_choices = next_evt.get('choices', [])
-                store.ai_event_outfit_items = next_evt.get('outfit_suggestion',{}).get('items',[])
-                store.ai_event_is_quest = next_evt.get('is_quest', False)
-                store.ai_event_qtitle = unicode(next_evt.get('quest_title', u''))
-                store.ai_event_qdesc = unicode(next_evt.get('quest_desc', u''))
-                store.ai_events.append(next_evt)
-                try:
-                    if event_choice_result in store.ai_prefetched:
-                        del store.ai_prefetched[event_choice_result]
-                except: pass
-                
-                # Предзагрузка следующего уровня ветки в фоне
-                if not AI_LOW_VRAM_SAFE_MODE:
-                    try:
-                        def _prefetch_next_level(idx, txt):
-                            try:
-                                gs=get_state()
-                                cont="Prev step: %s - %s. Chose: %s. Fem %s%%. Generate NEXT short JSON step. Keep it concise and valid JSON." % (next_evt.get('title',''), next_evt.get('description','')[:200], txt[:100], gs['fem'])
-                                nxt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont, want_json=True, temp=0.82, max_tokens=AI_PREFETCH_MAX_TOKENS, task_desc=u"Разветвление уровня")
-                                if nxt and isinstance(nxt, dict) and not nxt.get('title', '').startswith("__ERROR"):
-                                    store.ai_prefetched[idx]=ai_normalize_event(nxt)
-                                    print("Prefetched next level %s" % nxt.get('title',''))
-                            except Exception as e:
-                                print("Prefetch next level err %s" % e)
-                        for i,ch2 in enumerate(next_evt.get('choices',[])[:3]):
-                            ct=ch2.get('text','') if hasattr(ch2, 'get') else str(ch2)
-                            import threading
-                            threading.Thread(target=_prefetch_next_level, args=(i, ct)).start()
-                    except Exception as e:
-                        print("Prefetch next setup %s" % e)
-                store._has_next = True
-                renpy.notify(u"Следующий шаг готов (предзагружен)")
-            else:
+            # Если это кнопка "Accept the outcome" на финальном экране — просто закрываем
+            if ai_dict_like(ch) and (ch.get('is_ending_ack') or (_cur_evt and _cur_evt.get('_is_ending'))):
                 store._has_next = False
-                ai_reset_quest_state() # Сбрасываем и очищаем стейт при завершении квеста!
-                renpy.notify(u"Квест завершен")
+                ai_reset_quest_state()
+                renpy.notify(u"Итог принят")
+                # skip rest of choice logic via flag
+                store._ai_choice_handled = True
+            else:
+                store._ai_choice_handled = False
+
+            if not getattr(store, '_ai_choice_handled', False):
+                # трек пути по квесту для финального summary
+                try:
+                    if not getattr(store, 'ai_quest_path', None):
+                        store.ai_quest_path = []
+                    ctxt = ch.get('text', u'choice') if ai_dict_like(ch) else u'choice'
+                    store.ai_quest_path.append(ai_to_text(ctxt, u'choice'))
+                    store.ai_quest_path = store.ai_quest_path[-12:]
+                except Exception:
+                    pass
+
+                # единый apply: статы / money / perk / spicy
+                reward_summary = ai_apply_choice_effects(ch)
+                if reward_summary:
+                    try:
+                        store.ai_notify_queue.append(u"ИИ: %s" % reward_summary)
+                    except Exception:
+                        pass
+
+            if not getattr(store, '_ai_choice_handled', False):
+                # Запоминаем выбор во взаимоотношениях с персонажем (ДОЛГОСРОЧНАЯ ПАМЯТЬ)
+                if _cur_evt and _cur_evt.get('npc_involved'):
+                    npc_info = _cur_evt['npc_involved']
+                    npc_fname = npc_info.get('fname', '').lower()
+                    if npc_fname:
+                        choice_text = ch.get('text', 'completed action') if ai_dict_like(ch) else 'completed action'
+                        memory_entry = u"Samantha chose: '%s' during event: '%s' (%s)" % (choice_text, _cur_evt.get('title'), unicode(_cur_evt.get('description', u''))[:120])
+                        if npc_fname not in store.ai_npc_memories:
+                            store.ai_npc_memories[npc_fname] = []
+                        store.ai_npc_memories[npc_fname].append(memory_entry)
+                        store.ai_npc_memories[npc_fname] = store.ai_npc_memories[npc_fname][-10:]
+                        print("Saved relationship memory for %s: %s" % (npc_fname, memory_entry))
+
+                next_evt = None
+                ending_evt = None
+
+                # 1. Полно-цепочечные квесты / деревья
+                try:
+                    full_q = getattr(store, 'ai_full_quest_data', None) or ai_full_quest_data
+                    if ai_dict_like(full_q) and full_q.get('steps'):
+                        next_step_id = None
+                        if ai_dict_like(ch):
+                            next_step_id = ch.get('next_step', ch.get('next', ch.get('goto', None)))
+                        if next_step_id not in (None, '', u'', 'null', 'None'):
+                            next_step_id = ai_to_text(next_step_id, u'').strip()
+                            target = None
+                            for step in full_q.get('steps', []):
+                                if not ai_dict_like(step):
+                                    continue
+                                if unicode(step.get('id', '')) == unicode(next_step_id):
+                                    target = step
+                                    break
+                            if target is None:
+                                nslow = unicode(next_step_id).lower().replace(' ', '')
+                                for step in full_q.get('steps', []):
+                                    if not ai_dict_like(step):
+                                        continue
+                                    if unicode(step.get('id', '')).lower().replace(' ', '') == nslow:
+                                        target = step
+                                        break
+                            if target is not None:
+                                store.ai_full_quest_current_step = target.get('id')
+                                next_evt = ai_step_to_event(full_q, target, spicy_level=getattr(store, 'ai_spicy_meter', 2))
+                                print("Full quest advance -> %s" % target.get('id'))
+                            else:
+                                print("Full quest next_step id not found: %s -> force ending" % next_step_id)
+                                ending_evt = ai_build_quest_ending_event(full_q, ch, _cur_evt)
+                        else:
+                            # Терминальный выбор ветки -> экран итога с наградами
+                            print("Full quest terminal choice -> building ending screen")
+                            ending_evt = ai_build_quest_ending_event(full_q, ch, _cur_evt)
+                except Exception as e:
+                    print("Full quest next step err %s" % e)
+
+                # 2. Prefetch fallback (если дерева нет)
+                if not next_evt and not ending_evt:
+                    try:
+                        next_evt = store.ai_prefetched.get(event_choice_result) if hasattr(store, 'ai_prefetched') else None
+                    except Exception:
+                        next_evt = None
+
+                # 3. Если одиночное событие без дерева и без prefetch — тоже покажем мини-итог
+                if not next_evt and not ending_evt:
+                    if ai_dict_like(ch) and (ch.get('ending_text') or ch.get('ending_title') or ch.get('is_ending') or (ai_dict_like(ch.get('effects', {})) and ch.get('effects'))):
+                        ending_evt = ai_build_quest_ending_event(getattr(store, 'ai_full_quest_data', None), ch, _cur_evt)
+
+                if ending_evt:
+                    next_evt = ending_evt
+
+                if next_evt:
+                    print("Using next/ending event for choice %s" % event_choice_result)
+                    next_evt = ai_stage_event_for_ui(next_evt, reason=u"Next/ending step staged for UI")
+                    try:
+                        if ai_dict_like(next_evt) and ai_dict_like(next_evt.get('outfit_suggestion', {})) and next_evt.get('outfit_suggestion', {}).get('items'):
+                            auto_equip(next_evt['outfit_suggestion']['items'])
+                    except Exception as e:
+                        print("auto_equip next err: %s" % e)
+                    try:
+                        store.ai_events.append(next_evt)
+                    except Exception as e:
+                        print("append next err: %s" % e)
+                    try:
+                        if hasattr(store, 'ai_prefetched') and event_choice_result in store.ai_prefetched:
+                            del store.ai_prefetched[event_choice_result]
+                    except Exception:
+                        pass
+
+                    if (not getattr(store, 'ai_full_quest_data', None)) and (not AI_LOW_VRAM_SAFE_MODE) and not next_evt.get('_is_ending'):
+                        try:
+                            def _prefetch_next_level(idx, txt):
+                                try:
+                                    gs = get_state()
+                                    cont = "Prev step: %s - %s. Chose: %s. Fem %s%%. Generate NEXT short JSON step. Keep it concise and valid JSON." % (next_evt.get('title', ''), next_evt.get('description', '')[:200], txt[:100], gs['fem'])
+                                    nxt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont, want_json=True, temp=0.82, max_tokens=AI_PREFETCH_MAX_TOKENS, task_desc=u"Разветвление уровня")
+                                    if nxt and isinstance(nxt, dict) and not unicode(nxt.get('title', '')).startswith("__ERROR"):
+                                        store.ai_prefetched[idx] = ai_normalize_event(nxt)
+                                        print("Prefetched next level %s" % nxt.get('title', ''))
+                                except Exception as e:
+                                    print("Prefetch next level err %s" % e)
+                            for i, ch2 in enumerate(next_evt.get('choices', [])[:3]):
+                                ct = ch2.get('text', '') if hasattr(ch2, 'get') else str(ch2)
+                                import threading
+                                threading.Thread(target=_prefetch_next_level, args=(i, ct)).start()
+                        except Exception as e:
+                            print("Prefetch next setup %s" % e)
+
+                    store._has_next = True
+                    try:
+                        if next_evt.get('_is_ending'):
+                            renpy.notify(u"Итог ветки")
+                        else:
+                            sn = next_evt.get('_step_no')
+                            st = next_evt.get('_step_total')
+                            if sn and st:
+                                renpy.notify(u"Шаг %s/%s" % (sn, st))
+                            else:
+                                renpy.notify(u"Следующий шаг квеста")
+                    except Exception:
+                        renpy.notify(u"Следующий шаг квеста")
+                else:
+                    store._has_next = False
+                    ai_reset_quest_state()
+                    renpy.notify(u"Квест завершен")
         except Exception as e:
             print("choice handling err %s" % e)
             store._has_next = False
@@ -2695,15 +3745,7 @@ init python:
 # LABEL ДЛЯ ЗАПУСКА АВТОМАТИЧЕСКИХ СОБЫТИЙ
 label ai_trigger_automatic_event_label:
     $ store._automatic_event_active = True
-    $ store.ai_last_event = ai_normalize_event(store.ai_current_automatic_event)
-    $ store.ai_event_ui_cache = store.ai_last_event
-    $ store.ai_event_title = unicode(store.ai_last_event.get('title', u'Событие'))
-    $ store.ai_event_desc = unicode(store.ai_last_event.get('description', u'...'))
-    $ store.ai_event_choices = store.ai_last_event.get('choices', [])
-    $ store.ai_event_outfit_items = store.ai_last_event.get('outfit_suggestion',{}).get('items',[])
-    $ store.ai_event_is_quest = store.ai_last_event.get('is_quest', False)
-    $ store.ai_event_qtitle = unicode(store.ai_last_event.get('quest_title', u''))
-    $ store.ai_event_qdesc = unicode(store.ai_last_event.get('quest_desc', u''))
+    $ store.ai_last_event = ai_stage_event_for_ui(store.ai_current_automatic_event, reason=u"Automatic event staged for UI")
     $ ai_events.append(store.ai_last_event)
     
     if store.ai_last_event.get('outfit_suggestion',{}).get('items'):
