@@ -1,0 +1,77 @@
+# ai_config_tags.rpy - КОНФИГ ТЕГОВ КОМФОРТА
+# Этот файл можно править самому, он не перезаписывается при обновлении основного мода
+# Добавляй свои темы сюда. Фильтр в основном моде будет учитывать только те теги что ты разрешил.
+
+init python:
+    # Уровень комфорта: 0 = запретить, 1 = только намёки/мягко/согласие, 2 = разрешить полностью
+    # Если фильтра LLM нет - он всё равно не сгенерит запрещенное, но наш фильтр не даст показать ивент с запрещенным тегом
+
+    AI_COMFORT_TAGS = [
+        # Базовые - уже есть в TheFixer лоре
+        {"id": "femininity", "name": "Феминизация / Sissification", "desc": "Тренировка быть девушкой, походка, одежда", "level": 2, "always": True},
+        {"id": "crossdressing", "name": "Кроссдрессинг", "desc": "Переодевание в женское", "level": 2, "always": True},
+        {"id": "humiliation", "name": "Унижение", "desc": "Словесное унижение", "level": 2},
+        {"id": "gender_bender_humiliation", "name": "Унижение из-за смены пола", "desc": "Унижение из-за смены пола", "level": 2},
+
+        # Социальные
+        {"id": "blackmail", "name": "Шантаж", "desc": "Шантаж фотками, секретом что был мужиком", "level": 2},
+        {"id": "exhibitionism", "name": "Эксгибиционизм", "desc": "Показывать тело на людях", "level": 2},
+        {"id": "voyeurism", "name": "Вуайеризм", "desc": "Подглядывание", "level": 1},
+        {"id": "bullying", "name": "Буллинг / Травля", "desc": "Школа, Wolf Pack и т.д.", "level": 2},
+
+        # Секс-работа
+        {"id": "prostitution", "name": "Проституция", "desc": "Продажа тела за деньги", "level": 2},
+        {"id": "freeuse", "name": "Free Use / Общественное пользование", "desc": "Используют без спроса в определенных зонах", "level": 2},
+        {"id": "slavery", "name": "Рабство / Владение", "desc": "Клеймо, ошейник, принадлежность Институту/персонажу", "level": 2},
+
+        # Согласие
+        {"id": "dubcon", "name": "Сомнительное согласие / Пьяная", "desc": "Пьяная, накачанная, не до конца понимает", "level": 2},
+        {"id": "noncon", "name": "Non-con / Изнасилование", "desc": "Полностью несогласный секс", "level": 2},
+        {"id": "violence", "name": "Насилие", "desc": "Избиение, физическое насилие не сексуальное", "level": 2},
+
+        # Вещества
+        {"id": "alcohol", "name": "Алкоголь", "desc": "Пьянки в пабе", "level": 2},
+        {"id": "drugs_light", "name": "Легкие наркотики / Травка", "desc": "Травка, таблетки Lebo из игры", "level": 2},
+        {"id": "drugs_hard", "name": "Тяжелые наркотики", "desc": "Хард", "level": 2},
+
+        # Кинки
+        {"id": "bdsm_light", "name": "BDSM Лайт", "desc": "Связывание, шлепки, повязка", "level": 2},
+        {"id": "bdsm_hard", "name": "BDSM Хард", "desc": "Жесткий бондаж, пытки, иглы", "level": 2},
+        {"id": "gag", "name": "Кляп / Gag", "desc": "Кляп во рту", "level": 2},
+        {"id": "chastity", "name": "Пояс верности", "desc": "Пояс верности, клетка", "level": 0},
+        {"id": "pregnancy", "name": "Беременность / Breeding", "desc": "Риск беременности, желание забеременеть", "level": 2},
+        {"id": "breeding", "name": "Разведение / Оплодотворение", "desc": "Целенаправленное оплодотворение", "level": 2},
+        {"id": "incest", "name": "Инцест (сестра Эмили)", "desc": "Сестра Emile есть в лоре", "level": 2},
+        {"id": "cheating", "name": "Измена / NTR", "desc": "Измена, NTR", "level": 0},
+
+        # Экстрим - по умолчанию запрещены, можешь включить если хочешь
+        {"id": "blood", "name": "Кровь", "desc": "Кровь, порезы", "level": 2},
+        {"id": "scat", "name": "Scat", "desc": "Фекалии", "level": 0},
+        {"id": "watersports", "name": "Watersports", "desc": "Золотой дождь", "level": 0},
+        {"id": "mindcontrol", "name": "Контроль разума / Гипноз", "desc": "Промывка мозгов Институтом", "level": 2},
+        {"id": "body_mod_pirs", "name": "Пирсинг", "desc": "Пирсинг", "level": 2},
+        {"id": "body_mod_tatoo", "name": "Тату", "desc": "Тату", "level": 2},
+        {"id": "body_mod_silicone", "name": "Силикон", "desc": "Силикон", "level": 0},
+
+        # Добавь свои ниже - просто скопируй строку и поменяй id/name
+        # {"id": "my_tag", "name": "Мой тег", "desc": "Описание", "level": 2},
+    ]
+
+    # Словарь для быстрого доступа
+    AI_COMFORT_DICT = {t['id']: t for t in AI_COMFORT_TAGS}
+
+    def ai_is_tag_allowed(tag_id):
+        # Проверяет разрешен ли тег
+        t = AI_COMFORT_DICT.get(tag_id)
+        if not t:
+            return True  # неизвестный тег разрешаем по умолчанию
+        return t['level'] > 0
+
+    def ai_get_allowed_tags():
+        return [t['id'] for t in AI_COMFORT_TAGS if t['level'] > 0]
+
+    def ai_get_forbidden_tags():
+        return [t['id'] for t in AI_COMFORT_TAGS if t['level'] == 0]
+
+    # Для дебага - список всех id
+    # print("Comfort tags loaded: %s" % AI_COMFORT_TAGS)
