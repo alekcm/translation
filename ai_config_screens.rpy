@@ -1,4 +1,4 @@
-# ai_config_screens.rpy - Экраны для тегов комфорта, локаций, фракций, spicy - без ошибок синтаксиса
+# ai_config_screens.rpy - Экраны для тегов комфорта, локаций, фракций, spicy - с управлением автоматизацией
 
 screen ai_comfort_tags_screen():
     modal True
@@ -148,7 +148,7 @@ screen ai_spicy_config_screen():
     add Solid("#000000bb")
     frame:
         xalign 0.5 yalign 0.5
-        xsize 600 ysize 500
+        xsize 620 ysize 680
         background "#12121a"
         vbox:
             xfill True yfill True
@@ -156,39 +156,73 @@ screen ai_spicy_config_screen():
                 background "#3a1a3a" xfill True ysize 60
                 hbox:
                     xfill True
-                    text "Spicy Meter" size 18 bold True color "#ff88ff"
+                    text "Настройки Spicy и Автоматизации ИИ" size 18 bold True color "#ff88ff"
                     textbutton "X" action Return() xalign 1.0
             frame:
                 background "#1a1a2a" xfill True yfill True
-                vbox:
-                    spacing 15
-                    python:
-                        try:
-                            _chance = ai_get_spicy_chance()
-                            _meter = ai_spicy_meter
-                            _total = ai_total_quests
-                            _spicy = ai_total_spicy_quests
-                        except:
-                            _chance = 20
-                            _meter = 20
-                            _total = 0
-                            _spicy = 0
-                    text "Шанс spicy: [_chance]%%" size 16 bold True color "#ff88cc"
-                    text "Метр: [_meter]%%" size 14 color "#aaa"
-                    text "Всего квестов: [_total], spicy: [_spicy]" size 12 color "#888"
-                    bar:
-                        value ai_spicy_meter
-                        range 100
-                        xsize 500 ysize 20
-                        left_bar Solid("#ff44aa")
-                        right_bar Solid("#333")
-                    hbox:
-                        spacing 10
-                        textbutton "Сброс 20%" action SetVariable("ai_spicy_meter", 20) background "#2a2a4a"
-                        textbutton "+20" action SetVariable("ai_spicy_meter", min(80, ai_spicy_meter+20)) background "#3a2a4a"
-                        textbutton "-20" action SetVariable("ai_spicy_meter", max(0, ai_spicy_meter-20)) background "#3a1a1a"
-                    text "После спокойного +20 к шансу, после spicy -40. Ночь, высокая фем, коррапт, beach/pub/haven повышают шанс." size 12 color "#aaa"
-                    text "Файл: ai_config_spicy.rpy" size 11 color "#666"
+                viewport:
+                    scrollbars "vertical" mousewheel True
+                    vbox:
+                        spacing 15
+                        xfill True
+                        python:
+                            try:
+                                _chance = ai_get_spicy_chance()
+                                _meter = ai_spicy_meter
+                                _total = ai_total_quests
+                                _spicy = ai_total_spicy_quests
+                            except:
+                                _chance = 20
+                                _meter = 20
+                                _total = 0
+                                _spicy = 0
+                        
+                        text "Шанс Spicy NSFW: [_chance]%%" size 16 bold True color "#ff88cc"
+                        text "Текущий накопительный метр: [_meter]%%" size 12 color "#aaa"
+                        text "Всего квестов: [_total], из них spicy: [_spicy]" size 11 color "#888"
+                        
+                        bar:
+                            value ai_spicy_meter
+                            range 100
+                            xsize 500 ysize 15
+                            left_bar Solid("#ff44aa")
+                            right_bar Solid("#333")
+                        
+                        hbox:
+                            spacing 10
+                            textbutton "Сброс 20%" action SetVariable("ai_spicy_meter", 20) background "#2a2a4a"
+                            textbutton "+20" action SetVariable("ai_spicy_meter", min(80, ai_spicy_meter+20)) background "#3a2a4a"
+                            textbutton "-20" action SetVariable("ai_spicy_meter", max(0, ai_spicy_meter-20)) background "#3a1a1a"
+                        
+                        text "После спокойного +20 к шансу, после spicy -40. Ночь, высокая фем, коррапт, пляж/бар повышают шанс." size 11 color "#aaa"
+                        
+                        # Новая секция настроек автоматизации
+                        null height 10
+                        frame:
+                            background "#221a35" xfill True ysize 3
+                        null height 5
+                        
+                        text "Автоматизация Систем ИИ (Без дебаг кнопок)" size 15 bold True color "#88ffaa"
+                        
+                        hbox:
+                            spacing 15
+                            text "Автоматические события:" size 13 color "#ccc"
+                            textbutton "[ai_auto_events_enabled]" action ToggleVariable("ai_auto_events_enabled") background "#2a2a4a"
+                        
+                        hbox:
+                            spacing 15
+                            text "Шанс авто-событий при переходе:" size 13 color "#ccc"
+                            textbutton "-5%" action SetVariable("ai_auto_event_chance", max(5, ai_auto_event_chance-5)) background "#3a1a1a"
+                            text "[ai_auto_event_chance]%" size 13 bold True color "#ffaa44"
+                            textbutton "+5%" action SetVariable("ai_auto_event_chance", min(95, ai_auto_event_chance+5)) background "#1a3a2a"
+                        
+                        hbox:
+                            spacing 15
+                            text "Автоматические SMS:" size 13 color "#ccc"
+                            textbutton "[ai_auto_sms_enabled]" action ToggleVariable("ai_auto_sms_enabled") background "#2a2a4a"
+                        
+                        text "События и SMS генерируются заранее в фоновом потоке Ollama и срабатывают мгновенно и бесшовно во время игры, сохраняя полное погружение!" size 11 color "#888" italic True
+                        text "Файл настроек: ai_config_spicy.rpy" size 11 color "#666"
 
 # Labels to open config screens
 label ai_comfort_open:
