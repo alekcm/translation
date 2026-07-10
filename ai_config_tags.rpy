@@ -75,3 +75,19 @@ init python:
 
     # Для дебага - список всех id
     # print("Comfort tags loaded: %s" % AI_COMFORT_TAGS)
+
+    def ai_event_has_hard_blocked_content(event):
+        """Неотключаемый safety-filter. По умолчанию ничего не блокирует.
+        Можно расширить под свои hard-ban слова/теги."""
+        try:
+            if not event:
+                return False
+            # Пример: раскомментируй и дополни при необходимости
+            # blob = (unicode(event.get('title','')) + ' ' + unicode(event.get('description',''))).lower()
+            # for bad in []:
+            #     if bad and bad in blob:
+            #         return True
+            return False
+        except Exception:
+            return False
+

@@ -64,24 +64,25 @@ init python:
     OLLAMA_LOW_VRAM = True          # более щадящий режим под 4GB VRAM
     OLLAMA_NUM_THREAD = 4           # не душим CPU лишними потоками, когда часть работы уйдёт на GPU
     OLLAMA_NUM_BATCH = 32           # меньше batch => меньше риск вывалиться из VRAM в RAM/CPU
-    OLLAMA_NUM_CTX = 2048           # 2048: нужно для деревьев квестов (3-4 шага) на 4GB VRAM
+    OLLAMA_NUM_CTX = 2048           # нормальный контекст для квестов; 2x2 всё равно ограничивает размер дерева
 
     # SAFE MODE для слабой/маленькой VRAM:
     # - отключает тяжёлую фоновую магию, которая забивает очередь Ollama
     # - отключает полные цепочки квестов и берёт более лёгкие одиночные события
     # - сериализует все запросы к Ollama одним глобальным lock, чтобы не было 5-10 одновременных потоков
     AI_LOW_VRAM_SAFE_MODE = True
-    # Полные деревья квестов (3-4 стадии) для РУЧНОЙ генерации события.
+    # Полные деревья квестов: теперь строго 2 уровня выбора (2 -> 2), 4 финала.
     # SAFE_MODE по-прежнему режет фоновый prefetch/SMS/auto, но НЕ рубит цепочки квестов.
     AI_ENABLE_FULL_QUEST_CHAIN = True
-    AI_FULL_QUEST_MIN_STEPS = 3
-    AI_FULL_QUEST_MAX_STEPS = 5
-    AI_FULL_QUEST_MAX_TOKENS = 900
+    AI_QUEST_ONE_STEP_TEST_MODE = True  # TEST: квест заканчивается после первого же выбора
+    AI_FULL_QUEST_MIN_STEPS = 1
+    AI_FULL_QUEST_MAX_STEPS = 1          # TEST: один экран квеста, выбор сразу завершает ветку
+    AI_FULL_QUEST_MAX_TOKENS = 450       # TEST: короткий одношаговый JSON, чтобы проверить HTTP 500/стабильность
     AI_FULL_QUEST_TIMEOUT = 180
     AI_EVENT_MAX_TOKENS = 420
     AI_PREFETCH_MAX_TOKENS = 280
     AI_EVENT_DEBUG = True
-    AI_PATCH_BUILD = "2026-07-10-tree2"
+    AI_PATCH_BUILD = "2026-07-10-oneclick-quest-test-cpu-retry"
     ai_ollama_global_lock = threading.Lock()
 
     # Текстовые описания 3D-окружения на основе скриншотов из папки Фотографии (для погружения ИИ в обстановку)
@@ -254,10 +255,12 @@ init python:
             evt['title'] = title
 
         choices = evt.get('choices', []) or []
-        # Гарантируем list + dict-like choices с text
+        # Гарантируем list + dict-like choices с text.
+        # Для квестов строго максимум 2 кнопки: стартовый выбор и второй выбор ветки.
+        choice_limit = 2 if bool(evt.get('is_quest', False) or evt.get('_full_quest', False)) else 3
         safe_choices = []
         try:
-            for ch in list(choices)[:5]:
+            for ch in list(choices)[:choice_limit]:
                 if ai_dict_like(ch):
                     ct = ai_to_text(ch.get('text', u'Continue'), u'Continue')
                     if not ct or ct.strip() in [u"", u"...", u"None"]:
@@ -314,6 +317,7 @@ init python:
         try:
             ai_set_event_debug(
                 reason,
+                raw=u"",  # не тащим старый RAW от прошлой ошибки Ollama в финальный UI-debug
                 parsed={
                     "title": store.ai_event_title,
                     "description": store.ai_event_desc,
@@ -322,6 +326,9 @@ init python:
                         for c in store.ai_event_choices
                     ],
                     "is_quest": store.ai_event_is_quest,
+                    "local_fallback": bool(evt.get('_local_fallback', False)) if ai_dict_like(evt) else False,
+                    "one_step_test": bool(evt.get('_one_step_test', False)) if ai_dict_like(evt) else False,
+                    "llm_failed_reason": ai_to_text(evt.get('_llm_failed_reason', u''), u'') if ai_dict_like(evt) else u'',
                 },
             )
         except Exception as e:
@@ -639,6 +646,49 @@ Guidelines:
         setattr(store, var_name, not current)
         renpy.restart_interaction()
 
+    def ai_repair_json_text(text):
+        """Лёгкий ремонт JSON от слабых GGUF: незакрытые кавычки у ключей, choices: без кавычек и т.п."""
+        if text is None:
+            return text
+        try:
+            s = unicode(text)
+        except Exception:
+            try:
+                s = str(text)
+            except Exception:
+                return text
+        s = re.sub(r'```json|```', '', s).strip()
+
+        # Оставляем только внешний JSON-объект/массив, если модель добавила мусор вокруг.
+        f_curly = s.find('{')
+        f_bracket = s.find('[')
+        if f_bracket != -1 and (f_curly == -1 or f_bracket < f_curly):
+            l_bracket = s.rfind(']')
+            if l_bracket != -1:
+                s = s[f_bracket:l_bracket+1]
+        elif f_curly != -1:
+            l_curly = s.rfind('}')
+            if l_curly != -1:
+                s = s[f_curly:l_curly+1]
+
+        # Частые поломки Dirty-Muse/малых GGUF:
+        #   choices:[...]              -> "choices":[...]
+        #   description:"..."         -> "description":"..."
+        #   ,next_step":null          -> ,"next_step":null
+        # Работает только после { или , чтобы не трогать обычный текст в строках.
+        key = r'[A-Za-z_][A-Za-z0-9_]*'
+        s = re.sub(r'([\{,]\s*)(' + key + r')"\s*:', r'\1"\2":', s)
+        s = re.sub(r'([\{,]\s*)(' + key + r')\s*:', r'\1"\2":', s)
+
+        # Иногда модель пишет Python-подобные литералы.
+        s = re.sub(r'\bNone\b', 'null', s)
+        s = re.sub(r'\bTrue\b', 'true', s)
+        s = re.sub(r'\bFalse\b', 'false', s)
+
+        # Убираем висячие запятые перед } или ].
+        s = re.sub(r',\s*([\}\]])', r'\1', s)
+        return s
+
     # Base call с настраиваемым таймаутом 25 секунд для разгрузки Олламы
     def ai_call(model, sys_prompt, user_prompt, want_json=False, temp=0.85, max_tokens=700, task_desc=None, timeout=120, force_json_format=True):
         if task_desc:
@@ -710,8 +760,23 @@ Guidelines:
                 try:
                     parsed_json = json.loads(content)
                 except Exception as je:
-                    print("AI JSON parse error %s: %s | raw=%s" % (model, je, raw_content[:800] if raw_content else ""))
-                    return "__ERROR_JSON__ %s" % je
+                    # Слабые uncensored GGUF часто почти попадают в JSON, но забывают кавычки у ключей
+                    # (choices:, description:, ,next_step":). Пробуем быстрый ремонт вместо падения.
+                    repaired = ai_repair_json_text(content)
+                    try:
+                        parsed_json = json.loads(repaired)
+                        try:
+                            store.ai_debug_last_json_raw = unicode(raw_content) + u"\n\n[AI_JSON_REPAIRED]\n" + unicode(repaired)
+                        except Exception:
+                            pass
+                        print("AI JSON repaired successfully for %s after parse error: %s" % (model, je))
+                    except Exception as je2:
+                        try:
+                            store.ai_debug_last_json_raw = unicode(raw_content) + u"\n\n[AI_JSON_REPAIR_FAILED]\n" + unicode(repaired)
+                        except Exception:
+                            pass
+                        print("AI JSON parse error %s: %s | repair failed: %s | raw=%s" % (model, je, je2, raw_content[:800] if raw_content else ""))
+                        return "__ERROR_JSON__ %s | repair: %s" % (je, je2)
                 if task_desc:
                     try:
                         store.ai_notify_queue.append(u"ИИ: (%s) успешно готов!" % task_desc)
@@ -739,6 +804,9 @@ Guidelines:
                     pass
             if "404" in err_msg or "not found" in err_msg.lower():
                 return "__ERROR_MODEL_NOT_FOUND__"
+            elif "500" in err_msg or "internal server error" in err_msg.lower():
+                # Это не ошибка JSON в моде: упал сам сервер/бекенд Ollama (часто VRAM/контекст/модель).
+                return "__ERROR_OLLAMA_500__ %s" % err_msg
             elif "111" in err_msg or "connection refused" in err_msg.lower() or "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
                 return "__ERROR_OLLAMA_OFFLINE__"
             return "__ERROR__ %s" % err_msg
@@ -747,6 +815,79 @@ Guidelines:
                 try:
                     ai_ollama_global_lock.release()
                 except:
+                    pass
+
+    def ai_call_json_cpu_safe(model, sys_prompt, user_prompt, temp=0.25, max_tokens=220, task_desc=None, timeout=180):
+        """Аварийный JSON-вызов для квестов после HTTP 500: без GPU, без format=json, маленький ctx."""
+        if task_desc:
+            try:
+                store.ai_notify_queue.append(u"ИИ: CPU-safe retry (%s)..." % task_desc)
+            except Exception:
+                pass
+        messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
+        safe_options = {
+            "temperature": temp,
+            "top_p": 0.9,
+            "num_predict": max_tokens,
+            "num_ctx": 1024,
+            "num_thread": max(1, min(4, OLLAMA_NUM_THREAD)),
+            "num_batch": 16,
+            "num_gpu": 0,
+        }
+        payload = {"model": model, "messages": messages, "stream": False, "options": safe_options}
+        lock_acquired = False
+        raw_content = None
+        try:
+            ai_ollama_global_lock.acquire()
+            lock_acquired = True
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib2.Request(OLLAMA_URL, data=data, headers={'Content-Type': 'application/json'})
+            resp = urllib2.urlopen(req, timeout=timeout or 180)
+            res = json.loads(resp.read().decode('utf-8'))
+            raw_content = res['message']['content']
+            try:
+                store.ai_debug_last_json_raw = unicode(raw_content)
+            except Exception:
+                pass
+            content = ai_repair_json_text(raw_content)
+            try:
+                parsed_json = json.loads(content)
+            except Exception as je:
+                try:
+                    store.ai_debug_last_json_raw = unicode(raw_content) + u"\n\n[CPU_SAFE_JSON_REPAIR_FAILED]\n" + unicode(content)
+                except Exception:
+                    pass
+                print("CPU-safe JSON parse error %s: %s | raw=%s" % (model, je, raw_content[:800] if raw_content else ""))
+                return "__ERROR_JSON_CPU_SAFE__ %s" % je
+            try:
+                store.ai_debug_last_json_raw = unicode(raw_content) + u"\n\n[CPU_SAFE_JSON_OK]\n" + unicode(content)
+            except Exception:
+                pass
+            if task_desc:
+                try:
+                    store.ai_notify_queue.append(u"ИИ: CPU-safe retry готов (%s)" % task_desc)
+                except Exception:
+                    pass
+            return parsed_json
+        except Exception as e:
+            err_msg = str(e)
+            print("CPU-safe AI call error %s: %s" % (model, err_msg))
+            try:
+                store.ai_debug_last_json_raw = unicode(raw_content) if raw_content else u"CPU_SAFE_AI_CALL_EXCEPTION: %s" % err_msg
+            except Exception:
+                pass
+            if "500" in err_msg or "internal server error" in err_msg.lower():
+                return "__ERROR_OLLAMA_500_CPU_SAFE__ %s" % err_msg
+            if "404" in err_msg or "not found" in err_msg.lower():
+                return "__ERROR_MODEL_NOT_FOUND__"
+            if "111" in err_msg or "connection refused" in err_msg.lower() or "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
+                return "__ERROR_OLLAMA_OFFLINE__"
+            return "__ERROR_CPU_SAFE__ %s" % err_msg
+        finally:
+            if lock_acquired:
+                try:
+                    ai_ollama_global_lock.release()
+                except Exception:
                     pass
 
     def get_state():
@@ -1414,6 +1555,210 @@ Guidelines:
         tree['steps'] = steps
         return tree
 
+    def ai_force_one_step_quest_tree(tree):
+        """TEST-режим: оставляет один шаг step1, а оба выбора сразу завершают квест."""
+        if not ai_dict_like(tree) or not tree.get('steps'):
+            return None
+        steps = [s for s in tree.get('steps', []) if ai_dict_like(s)]
+        if not steps:
+            return None
+        step = steps[0]
+        step['id'] = 'step1'
+        raw_choices = list(step.get('choices', []) or [])[:2]
+        defaults = [
+            {"text": u"Accept the quick challenge", "effects": {"femininity": 2, "confidence": 1}, "spicy_modifier": 1},
+            {"text": u"Refuse and move on", "effects": {"confidence": 1}, "spicy_modifier": -1},
+        ]
+        while len(raw_choices) < 2:
+            raw_choices.append(defaults[len(raw_choices)])
+        out = []
+        for idx, ch in enumerate(raw_choices[:2]):
+            if ai_dict_like(ch):
+                try:
+                    nch = dict(ch)
+                except Exception:
+                    nch = {}
+                txt = ai_to_text(nch.get('text', defaults[idx]['text']), defaults[idx]['text'])
+            else:
+                nch = {}
+                txt = ai_to_text(ch, defaults[idx]['text'])
+            if not txt or txt.strip() in [u'', u'...', u'None']:
+                txt = defaults[idx]['text']
+            eff = nch.get('effects') if ai_dict_like(nch.get('effects')) else defaults[idx].get('effects', {})
+            try:
+                eff = dict(eff)
+            except Exception:
+                pass
+            nch['text'] = txt
+            nch['effects'] = eff
+            nch['next_step'] = None
+            nch['is_ending'] = True
+            if not nch.get('ending_title'):
+                nch['ending_title'] = u"Quick Ending %s" % (idx + 1)
+            if not nch.get('ending_text'):
+                nch['ending_text'] = u"The short test quest ends immediately after this choice. Samantha carries the result onward."
+            if not nch.get('spicy_modifier'):
+                nch['spicy_modifier'] = defaults[idx].get('spicy_modifier', 0)
+            out.append(nch)
+        step['choices'] = out
+        tree['steps'] = [step]
+        tree['_one_step_test'] = True
+        return ai_ensure_terminal_endings(tree)
+
+    def ai_force_binary_quest_tree(tree):
+        """Жёстко режет квест до схемы 2 -> 2: step1, step2a, step2b, четыре терминальных исхода."""
+        if not ai_dict_like(tree) or not tree.get('steps'):
+            return None
+        raw_steps = [s for s in tree.get('steps', []) if ai_dict_like(s)]
+        if len(raw_steps) < 3:
+            return None
+
+        old_id_map = {}
+        for st in raw_steps:
+            try:
+                old_id_map[unicode(st.get('id', u''))] = st
+            except Exception:
+                pass
+
+        def _copy_effects(eff):
+            if ai_dict_like(eff):
+                try:
+                    return dict(eff)
+                except Exception:
+                    return eff
+            return {}
+
+        def _merge_effects(a, b):
+            res = _copy_effects(a)
+            other = _copy_effects(b)
+            for k, v in other.items():
+                if k in res and k not in ('perk_add', 'give_item'):
+                    try:
+                        res[k] = int(res.get(k, 0) or 0) + int(v or 0)
+                    except Exception:
+                        if not res.get(k):
+                            res[k] = v
+                elif k not in res or not res.get(k):
+                    res[k] = v
+            return res
+
+        def _clean_choice(ch, fallback_text):
+            if ai_dict_like(ch):
+                try:
+                    new_ch = dict(ch)
+                except Exception:
+                    new_ch = {}
+                txt = ai_to_text(new_ch.get('text', fallback_text), fallback_text)
+            else:
+                new_ch = {}
+                txt = ai_to_text(ch, fallback_text)
+            if not txt or txt.strip() in [u'', u'...', u'None']:
+                txt = fallback_text
+            new_ch['text'] = txt
+            if not ai_dict_like(new_ch.get('effects')):
+                new_ch['effects'] = {}
+            else:
+                new_ch['effects'] = _copy_effects(new_ch.get('effects'))
+            return new_ch
+
+        def _target_ending_payload(ch):
+            """Если LLM сделала отдельный end_* шаг, переносим его награды/текст в терминальный выбор."""
+            payload = {"effects": {}, "ending_title": None, "ending_text": None, "spicy_modifier": 0}
+            if not ai_dict_like(ch):
+                return payload
+            ns = ch.get('next_step', ch.get('next', ch.get('goto', None)))
+            if ns is None:
+                return payload
+            target = old_id_map.get(ai_to_text(ns, u''))
+            if not ai_dict_like(target):
+                return payload
+            payload['ending_title'] = target.get('title')
+            payload['ending_text'] = target.get('description')
+            tchoices = target.get('choices', []) or []
+            if tchoices and ai_dict_like(tchoices[0]):
+                tch = tchoices[0]
+                payload['effects'] = _copy_effects(tch.get('effects'))
+                if tch.get('perk_add') is not None and 'perk_add' not in payload['effects']:
+                    payload['effects']['perk_add'] = tch.get('perk_add')
+                payload['ending_title'] = tch.get('ending_title') or payload['ending_title']
+                payload['ending_text'] = tch.get('ending_text') or payload['ending_text']
+                try:
+                    payload['spicy_modifier'] = int(tch.get('spicy_modifier', tch.get('spicy', 0)) or 0)
+                except Exception:
+                    payload['spicy_modifier'] = 0
+            return payload
+
+        first = raw_steps[0]
+        mids = []
+        first_raw_choices = first.get('choices', []) or []
+        for ch in list(first_raw_choices)[:2]:
+            if ai_dict_like(ch):
+                ns = ch.get('next_step', ch.get('next', ch.get('goto', None)))
+                st = old_id_map.get(ai_to_text(ns, u'')) if ns is not None else None
+                if ai_dict_like(st) and st is not first and st not in mids:
+                    mids.append(st)
+        for st in raw_steps[1:]:
+            if st not in mids:
+                mids.append(st)
+            if len(mids) >= 2:
+                break
+        if len(mids) < 2:
+            return None
+        mid_a, mid_b = mids[0], mids[1]
+
+        # Каноничные id: меньше шансов, что RenPy зависнет на чужом/битом next_step.
+        first['id'] = 'step1'
+        mid_a['id'] = 'step2a'
+        mid_b['id'] = 'step2b'
+
+        fchoices = []
+        defaults = [u"Take the bold route", u"Take the careful route"]
+        raw = list(first.get('choices', []) or [])[:2]
+        while len(raw) < 2:
+            raw.append({"text": defaults[len(raw)], "effects": {"confidence": 1}})
+        for idx, ch in enumerate(raw[:2]):
+            nch = _clean_choice(ch, defaults[idx])
+            nch['next_step'] = 'step2a' if idx == 0 else 'step2b'
+            nch['is_ending'] = False
+            if 'ending_title' in nch:
+                del nch['ending_title']
+            if 'ending_text' in nch:
+                del nch['ending_text']
+            fchoices.append(nch)
+        first['choices'] = fchoices
+
+        def _terminalize_mid(step, branch_name, fallback_pair):
+            raw_choices = list(step.get('choices', []) or [])[:2]
+            while len(raw_choices) < 2:
+                raw_choices.append({"text": fallback_pair[len(raw_choices)], "effects": {"femininity": 2, "confidence": 1}})
+            out = []
+            for idx, ch in enumerate(raw_choices[:2]):
+                nch = _clean_choice(ch, fallback_pair[idx])
+                payload = _target_ending_payload(ch)
+                nch['effects'] = _merge_effects(nch.get('effects'), payload.get('effects'))
+                try:
+                    sm = int(nch.get('spicy_modifier', nch.get('spicy', 0)) or 0) + int(payload.get('spicy_modifier', 0) or 0)
+                except Exception:
+                    sm = 0
+                nch['spicy_modifier'] = sm
+                nch['next_step'] = None
+                nch['is_ending'] = True
+                nch['ending_title'] = nch.get('ending_title') or payload.get('ending_title') or (u"%s Outcome %s" % (branch_name, idx + 1))
+                nch['ending_text'] = nch.get('ending_text') or payload.get('ending_text') or (
+                    u"Your %s branch ends after choosing: %s. The result follows Samantha into the rest of the day."
+                    % (branch_name, ai_to_text(nch.get('text', u'your choice'), u'your choice'))
+                )
+                out.append(nch)
+            step['choices'] = out
+            return step
+
+        mid_a = _terminalize_mid(mid_a, u"bold", [u"Commit fully", u"Turn it into a controlled win"])
+        mid_b = _terminalize_mid(mid_b, u"careful", [u"Finish the careful challenge", u"Back out safely"])
+
+        tree['steps'] = [first, mid_a, mid_b]
+        tree['_binary_two_choice'] = True
+        return ai_ensure_terminal_endings(tree)
+
     def ai_normalize_quest_tree(data):
         """Приводит дерево квеста к стабильной схеме steps[] + choices[].next_step."""
         if not ai_dict_like(data):
@@ -1430,7 +1775,12 @@ Guidelines:
         steps = data.get('steps') or data.get('Stages') or data.get('stages') or []
         if not steps and ai_dict_like(data.get('tree')):
             steps = data.get('tree')
-        if not isinstance(steps, (list, tuple)) or len(steps) < 2:
+        if not isinstance(steps, (list, tuple)):
+            return None
+        if AI_QUEST_ONE_STEP_TEST_MODE:
+            if len(steps) < 1:
+                return None
+        elif len(steps) < 2:
             return None
 
         title = ai_to_text(data.get('title') or data.get('Title') or data.get('name') or u'Quest Chain', u'Quest Chain')
@@ -1467,7 +1817,8 @@ Guidelines:
             if not isinstance(raw_choices, (list, tuple)):
                 raw_choices = []
             norm_choices = []
-            for ch in list(raw_choices)[:3]:
+            # Внутри квестового дерева больше 2 вариантов не принимаем.
+            for ch in list(raw_choices)[:2]:
                 if ai_dict_like(ch):
                     ct = ai_to_text(ch.get('text') or ch.get('Text') or ch.get('label') or ch.get('choice') or u'Continue', u'Continue')
                     if not ct or ct.strip() in [u'', u'...', u'None', u'choice1', u'choice2']:
@@ -1514,7 +1865,17 @@ Guidelines:
                 "tags": step.get('tags', []) or [],
             })
 
-        if len(norm_steps) < 2:
+        if AI_QUEST_ONE_STEP_TEST_MODE:
+            if len(norm_steps) < 1:
+                return None
+            tree = {
+                "title": title,
+                "description": desc,
+                "steps": norm_steps,
+            }
+            return ai_force_one_step_quest_tree(tree)
+
+        if len(norm_steps) < 3:
             return None
 
         # Починить битые next_step: если указан несуществующий id — вести на следующий по порядку.
@@ -1533,10 +1894,12 @@ Guidelines:
                         if unicode(cand).lower().replace(' ', '') == nslow:
                             fixed = cand
                             break
-                    ch['next_step'] = fixed if fixed else default_next
+                    # В бинарном квесте только step1 должен автоматически вести дальше.
+                    # На step2 пустой/битый next_step означает финал ветки, а не переход в соседнюю ветку.
+                    ch['next_step'] = fixed if fixed else (default_next if idx == 0 else None)
                 elif not ns:
-                    # На не-последних шагах пустой next_step = линейное продолжение
-                    ch['next_step'] = default_next
+                    # Только первый шаг автопродолжаем; второй уровень должен быть терминальным.
+                    ch['next_step'] = default_next if idx == 0 else None
 
         # Гарантируем, что с первого шага есть хотя бы один путь дальше
         first = norm_steps[0]
@@ -1548,7 +1911,45 @@ Guidelines:
             "description": desc,
             "steps": norm_steps,
         }
-        return ai_ensure_terminal_endings(tree)
+        forced_tree = ai_force_binary_quest_tree(tree)
+        if forced_tree:
+            return forced_tree
+
+        # Сверхнадёжный fallback: если RenPy/Py2 или странный dict всё же не дал собрать binary-tree,
+        # не валим попытку LLM. Берём первые 3 нормализованных шага и принудительно делаем 2 -> 2.
+        try:
+            if len(norm_steps) >= 3:
+                s1 = norm_steps[0]
+                s2a = norm_steps[1]
+                s2b = norm_steps[2]
+                s1['id'] = 'step1'
+                s2a['id'] = 'step2a'
+                s2b['id'] = 'step2b'
+                while len(s1.get('choices', []) or []) < 2:
+                    s1.setdefault('choices', []).append({"text": u"Continue", "effects": {}})
+                s1['choices'] = list(s1.get('choices', []) or [])[:2]
+                s1['choices'][0]['next_step'] = 'step2a'
+                s1['choices'][0]['is_ending'] = False
+                s1['choices'][1]['next_step'] = 'step2b'
+                s1['choices'][1]['is_ending'] = False
+
+                for st, branch in [(s2a, u"branch A"), (s2b, u"branch B")]:
+                    while len(st.get('choices', []) or []) < 2:
+                        st.setdefault('choices', []).append({"text": u"Finish", "effects": {"femininity": 2, "confidence": 1}})
+                    st['choices'] = list(st.get('choices', []) or [])[:2]
+                    for ci, ch in enumerate(st['choices']):
+                        ch['next_step'] = None
+                        ch['is_ending'] = True
+                        if not ch.get('ending_title'):
+                            ch['ending_title'] = u"%s outcome %s" % (branch, ci + 1)
+                        if not ch.get('ending_text'):
+                            ch['ending_text'] = u"This path ends with Samantha accepting the result of her choice."
+                tree['steps'] = [s1, s2a, s2b]
+                tree['_binary_two_choice'] = True
+                return ai_ensure_terminal_endings(tree)
+        except Exception as e:
+            print("binary quest emergency fallback err: %s" % e)
+        return None
 
     def ai_step_to_event(full_q, step, spicy_level=2):
         """Первый/следующий шаг дерева -> event dict для UI."""
@@ -1579,19 +1980,58 @@ Guidelines:
             "_step_id": step.get('id', 'step1'),
             "_step_no": step_no,
             "_step_total": total,
+            "_local_fallback": bool(full_q.get('_local_fallback', False)),
+            "_one_step_test": bool(full_q.get('_one_step_test', False)),
+            "_llm_failed_reason": ai_to_text(full_q.get('_llm_failed_reason', u''), u''),
             "tags": step.get('tags', []) or ["femininity"],
             "spicy_level": spicy_level,
         }
         return ai_normalize_event(evt)
 
     def ai_make_local_quest_tree(gs):
-        """Локальное 3-шаговое дерево, если Ollama/JSON не вывезли. Чтобы игрок НЕ видел одношаговый Mirror."""
+        """Локальное бинарное дерево 2 -> 2, если Ollama/JSON не вывезли."""
         loc = ai_to_text(gs.get('location', u'home'), u'home')
         fem = gs.get('fem', 25)
         outfit = ai_to_text(gs.get('outfit', u'casual clothes'), u'casual clothes')
         timeofday = ai_to_text(gs.get('timeofday', u'day'), u'day')
-        title = u"Local Challenge: %s" % loc
-        desc = u"A practical femininity challenge based on where Samantha is right now."
+        title = (u"LOCAL FALLBACK TEST: %s" % loc) if AI_QUEST_ONE_STEP_TEST_MODE else (u"Local Challenge: %s" % loc)
+        desc = u"A compact one-click femininity challenge based on where Samantha is right now."
+        if AI_QUEST_ONE_STEP_TEST_MODE:
+            step1 = {
+                "id": "step1",
+                "title": u"Quick Test Challenge",
+                "description": u"You are at %s during %s, femininity %s%%, wearing %s. This test quest will end after one choice." % (loc, timeofday, fem, outfit),
+                "outfit_suggestion": {"items": ["item_top_22", "item_bottom_15"], "reason": "look more feminine"},
+                "choices": [
+                    {
+                        "text": u"Do the quick dare",
+                        "next_step": None,
+                        "effects": {"femininity": 3, "confidence": 1},
+                        "spicy_modifier": 2,
+                        "ending_title": u"Quick Dare Complete",
+                        "ending_text": u"The test quest ends immediately. Samantha takes the small win and moves on.",
+                        "is_ending": True,
+                    },
+                    {
+                        "text": u"Skip the quick dare",
+                        "next_step": None,
+                        "effects": {"confidence": 1},
+                        "spicy_modifier": -1,
+                        "ending_title": u"Quick Refusal",
+                        "ending_text": u"The test quest ends immediately. Samantha avoids the dare and continues her day.",
+                        "is_ending": True,
+                    },
+                ],
+                "tags": ["femininity", "crossdressing"],
+            }
+            return ai_ensure_terminal_endings({
+                "title": title,
+                "description": desc,
+                "steps": [step1],
+                "_local_fallback": True,
+                "_one_step_test": True,
+            })
+
         step1 = {
             "id": "step1",
             "title": u"Opening Move",
@@ -1608,30 +2048,12 @@ Guidelines:
             "title": u"Bold Path",
             "description": u"You push the dare further. Someone nearby notices, or you imagine they do, and your body reacts.",
             "choices": [
-                {"text": u"Commit fully", "next_step": "end_bold", "effects": {"femininity": 2, "corrupt": 1}, "spicy_modifier": 8},
-                {"text": u"Pull back a little", "next_step": "end_soft", "effects": {"confidence": 1}, "spicy_modifier": 0},
-            ],
-        }
-        step2b = {
-            "id": "step2b",
-            "title": u"Careful Path",
-            "description": u"You keep the challenge controlled. Still feminine, still risky, but safer.",
-            "choices": [
-                {"text": u"Finish the soft challenge", "next_step": "end_soft", "effects": {"femininity": 2}, "spicy_modifier": 1},
-                {"text": u"Abort early", "next_step": "end_bail", "effects": {"confidence": -1}, "spicy_modifier": -6},
-            ],
-        }
-        end_bold = {
-            "id": "end_bold",
-            "title": u"Bold Payoff",
-            "description": u"The bold path peaks. Your reflection and the world around you both treat you more like a girl.",
-            "choices": [
                 {
-                    "text": u"Own the result",
+                    "text": u"Commit fully",
                     "next_step": None,
                     "effects": {
-                        "femininity": 4,
-                        "corrupt": 1,
+                        "femininity": 6,
+                        "corrupt": 2,
                         "money": 20,
                         "perk_add": {
                             "name": u"Dared Herself",
@@ -1640,20 +2062,29 @@ Guidelines:
                             "add": 5,
                         },
                     },
-                    "spicy_modifier": 6,
+                    "spicy_modifier": 12,
                     "ending_title": u"Bold Ending",
                     "ending_text": u"You leave %s hotter and more shameless. The dare is over, but the habit is not." % loc,
                     "is_ending": True,
-                }
+                },
+                {
+                    "text": u"Turn it into a controlled win",
+                    "next_step": None,
+                    "effects": {"femininity": 3, "confidence": 2},
+                    "spicy_modifier": 1,
+                    "ending_title": u"Controlled Ending",
+                    "ending_text": u"You keep control at %s and still prove that your feminine side can handle pressure." % loc,
+                    "is_ending": True,
+                },
             ],
         }
-        end_soft = {
-            "id": "end_soft",
-            "title": u"Soft Payoff",
-            "description": u"You complete the challenge with poise instead of scandal.",
+        step2b = {
+            "id": "step2b",
+            "title": u"Careful Path",
+            "description": u"You keep the challenge controlled. Still feminine, still risky, but safer.",
             "choices": [
                 {
-                    "text": u"Accept the quiet win",
+                    "text": u"Finish the careful challenge",
                     "next_step": None,
                     "effects": {
                         "femininity": 3,
@@ -1669,30 +2100,24 @@ Guidelines:
                     "ending_title": u"Soft Ending",
                     "ending_text": u"No disaster, just progress. At %s you practiced being a girl and it stuck." % loc,
                     "is_ending": True,
-                }
-            ],
-        }
-        end_bail = {
-            "id": "end_bail",
-            "title": u"Escape",
-            "description": u"You cut the challenge short before it becomes too much.",
-            "choices": [
+                },
                 {
-                    "text": u"Leave and reset",
+                    "text": u"Back out safely",
                     "next_step": None,
                     "effects": {"confidence": 1, "femininity": 1},
                     "spicy_modifier": -4,
                     "ending_title": u"Bail Ending",
                     "ending_text": u"You escape the pressure at %s. Relief first, then a small sting of unfinished training." % loc,
                     "is_ending": True,
-                }
+                },
             ],
         }
         tree = {
             "title": title,
             "description": desc,
-            "steps": [step1, step2a, step2b, end_bold, end_soft, end_bail],
+            "steps": [step1, step2a, step2b],
             "_local_fallback": True,
+            "_binary_two_choice": True,
         }
         return ai_ensure_terminal_endings(tree)
 
@@ -1705,11 +2130,10 @@ Guidelines:
         allowed_tags = gs.get('allowed_tags', 'femininity, crossdressing')
 
         compact_user = (
-            "Make a compact JSON quest TREE for Samantha now. "
+            "Make ONE ultra-compact JSON quest for Samantha. "
             "loc=%s (%s); fem=%s; conf=%s; outfit=%s; time=%s; spicy=%s; tags=%s; recent=%s. "
-            "Need step1, two mid branches, and 2-3 ending steps. "
-            "Terminal choices: next_step null + ending_title + ending_text + effects (+ optional perk_add). "
-            "Only JSON."
+            "Exactly 1 step named step1. Exactly 2 choices. Both choices are terminal: next_step null. "
+            "Each choice needs effects, ending_title, ending_text. Keep it one short scene. Only JSON."
         ) % (
             gs.get('location', 'home'), loc_desc, gs.get('fem', 25), gs.get('confidence', 35),
             gs.get('outfit', ''), gs.get('timeofday', ''), spicy_level, allowed_tags, recent_acts
@@ -1720,9 +2144,15 @@ Guidelines:
             dict(sys_prompt=PROMPTS.get("event_full_compact", PROMPTS["event_full"]), user=compact_user, temp=0.55, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=True, label=u"tree-compact-json"),
             # 2) compact without format json (weak GGUF sometimes empty with format=json)
             dict(sys_prompt=PROMPTS.get("event_full_compact", PROMPTS["event_full"]), user=compact_user + " Return raw JSON object only.", temp=0.45, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"tree-compact-raw"),
-            # 3) full prompt last try, smaller tokens
-            dict(sys_prompt=PROMPTS["event_full"], user=compact_user, temp=0.5, max_tokens=min(700, AI_FULL_QUEST_MAX_TOKENS), force_json_format=True, label=u"tree-full-json"),
+            # 3) full prompt last try
+            dict(sys_prompt=PROMPTS["event_full"], user=compact_user, temp=0.5, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=True, label=u"tree-full-json"),
         ]
+        if AI_QUEST_ONE_STEP_TEST_MODE:
+            # Тест: ровно ОДИН максимально лёгкий запрос. Если он не прошёл — это видно в llm_failed_reason.
+            one_sys = u"""Return only one valid JSON object for a one-step TheFixer quest. Shape: {"title":"","description":"","steps":[{"id":"step1","title":"","description":"","choices":[{"text":"","next_step":null,"effects":{"femininity":1},"ending_title":"","ending_text":""},{"text":"","next_step":null,"effects":{"confidence":1},"ending_title":"","ending_text":""}]}]}. No markdown."""
+            attempts = [
+                dict(sys_prompt=one_sys, user=compact_user, temp=0.25, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"oneclick-raw"),
+            ]
 
         last_err = u""
         for i, att in enumerate(attempts):
@@ -1745,15 +2175,48 @@ Guidelines:
                 if isinstance(data, basestring) and data.startswith("__ERROR"):
                     last_err = data
                     ai_set_event_debug(u"Full quest attempt failed: %s -> %s" % (att['label'], data), raw=getattr(store, 'ai_debug_last_json_raw', u''))
+                    # HTTP 500 значит Ollama/модель уже упала. Не добиваем сервер ещё 1-2 запросами,
+                    # сразу используем локальный 2x2 fallback и даём Ollama остыть/перезапуститься.
+                    if data.startswith("__ERROR_OLLAMA_500__"):
+                        try:
+                            store.ai_notify_queue.append(u"ИИ: HTTP 500 от Ollama, пробую CPU-safe retry")
+                        except Exception:
+                            pass
+                        safe_data = ai_call_json_cpu_safe(
+                            OLLAMA_MODEL_JSON,
+                            att['sys_prompt'],
+                            att['user'],
+                            temp=0.2,
+                            max_tokens=min(220 if AI_QUEST_ONE_STEP_TEST_MODE else 450, att['max_tokens']),
+                            task_desc=u"CPU-safe %s" % att['label'],
+                            timeout=AI_FULL_QUEST_TIMEOUT,
+                        )
+                        if isinstance(safe_data, basestring) and safe_data.startswith("__ERROR"):
+                            last_err = data + u" | CPU-safe retry: " + ai_to_text(safe_data, u'')
+                            ai_set_event_debug(u"Full quest CPU-safe retry failed after HTTP 500: %s" % last_err, raw=getattr(store, 'ai_debug_last_json_raw', u''))
+                            break
+                        safe_tree = ai_normalize_quest_tree(safe_data)
+                        min_ok_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
+                        if safe_tree and len(safe_tree.get('steps', [])) >= min_ok_steps:
+                            ai_set_event_debug(
+                                u"Full quest tree OK via CPU-safe retry after HTTP 500 (%s steps)" % len(safe_tree.get('steps', [])),
+                                raw=getattr(store, 'ai_debug_last_json_raw', u''),
+                                parsed={"title": safe_tree.get('title'), "steps": [s.get('id') for s in safe_tree.get('steps', [])], "local": False, "cpu_safe_retry": True},
+                            )
+                            return safe_tree
+                        last_err = data + u" | CPU-safe retry normalize failed"
+                        ai_set_event_debug(u"Full quest CPU-safe retry normalize fail: %s" % last_err, raw=getattr(store, 'ai_debug_last_json_raw', u''), parsed=safe_data)
+                        break
                     continue
                 tree = ai_normalize_quest_tree(data)
-                if tree and len(tree.get('steps', [])) >= 2:
+                min_ok_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
+                if tree and len(tree.get('steps', [])) >= min_ok_steps:
                     ai_set_event_debug(
                         u"Full quest tree OK via %s (%s steps)" % (att['label'], len(tree.get('steps', []))),
-                        parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False},
+                        parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False, "one_step_test": bool(AI_QUEST_ONE_STEP_TEST_MODE)},
                     )
                     return tree
-                last_err = u"normalize failed or <2 steps for %s" % att['label']
+                last_err = u"normalize failed or <%s steps for %s" % (min_ok_steps, att['label'])
                 ai_set_event_debug(u"Full quest normalize fail: %s" % last_err, parsed=data)
             except Exception as e:
                 last_err = unicode(e)
@@ -1763,9 +2226,13 @@ Guidelines:
         # Локальный fallback — лучше, чем одношаговый Mirror
         print("full quest all attempts failed (%s), using local tree" % last_err)
         tree = ai_make_local_quest_tree(gs)
+        try:
+            tree['_llm_failed_reason'] = ai_to_text(last_err, u'unknown LLM failure')
+        except Exception:
+            pass
         ai_set_event_debug(
             u"Using LOCAL quest tree fallback. Last LLM error: %s" % last_err,
-            parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": True},
+            parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": True, "llm_failed_reason": ai_to_text(last_err, u'')},
         )
         try:
             store.ai_notify_queue.append(u"ИИ: LLM-дерево не собралось, использован локальный квест-шаблон")
@@ -1918,22 +2385,25 @@ RULES:
 """,
         "perk": "Generate new perk for TheFixer based on femininity %d%% and actions %s. JSON: {name:\"\", desc:\"\", type:\"confidence/desire/allure\", add:5, multi:1.2}. Name English, desc English. Only JSON.",
 
-        "event_full_compact": """You are TheFixer quest-tree JSON generator.
-Return ONLY one JSON object.
+        "event_full_compact": """You are TheFixer ONE-STEP quest JSON generator.
+Return ONLY one JSON object. No markdown.
+Required shape: exactly 1 step, exactly 2 terminal choices. The quest ends after the first player choice.
 Schema:
-{"title":"Park Dare","description":"A short femininity challenge.","steps":[{"id":"step1","title":"Start","description":"You face a dare here.","choices":[{"text":"Go bold","next_step":"step2a","effects":{"femininity":2},"spicy_modifier":6},{"text":"Go careful","next_step":"step2b","effects":{"confidence":1},"spicy_modifier":-2}]},{"id":"step2a","title":"Bold","description":"You push further.","choices":[{"text":"Finish bold","next_step":"end_bold","effects":{"femininity":2},"spicy_modifier":8}]},{"id":"step2b","title":"Careful","description":"You stay controlled.","choices":[{"text":"Finish soft","next_step":"end_soft","effects":{"femininity":2},"spicy_modifier":1}]},{"id":"end_bold","title":"Bold End","description":"Payoff of the bold path.","choices":[{"text":"Own it","next_step":null,"effects":{"femininity":4,"perk_add":{"name":"Bold Girl","desc":"She finishes daring challenges.","type":"allure","add":5}},"ending_title":"Bold Ending","ending_text":"You finish shameless and more feminine."}]},{"id":"end_soft","title":"Soft End","description":"Payoff of the careful path.","choices":[{"text":"Accept it","next_step":null,"effects":{"femininity":3,"confidence":2},"ending_title":"Soft Ending","ending_text":"Quiet progress, no scandal."}]}]}
+{"title":"Quick Dare","description":"A very short femininity challenge.","steps":[{"id":"step1","title":"Quick Choice","description":"You face one immediate dare here.","choices":[{"text":"Do the dare","next_step":null,"effects":{"femininity":3,"confidence":1},"spicy_modifier":2,"ending_title":"Dare Complete","ending_text":"You finish the dare and carry the result onward."},{"text":"Skip the dare","next_step":null,"effects":{"confidence":1},"spicy_modifier":-1,"ending_title":"Dare Skipped","ending_text":"You avoid the dare and move on."}]}]}
 Rules:
-- 4 to 5 steps total.
-- Branch once after step1.
-- Every terminal choice: next_step null, ending_title, ending_text, effects.
-- Optional perk_add on strong endings.
-- English only. No mystery/fantasy. Only JSON.
+- EXACTLY 1 step: step1.
+- step1 choices: exactly 2.
+- Both choices MUST have next_step null.
+- Both choices MUST include ending_title, ending_text, effects.
+- No step2a, no step2b, no end_* steps.
+- Keep JSON tiny and valid. English only. TheFixer daily femininity/sissification/outfit/social-pressure lore.
+Only JSON.
 """,
-        "event_full": """You are TheFixer FULL QUEST TREE Generator.
+        "event_full": """You are TheFixer ONE-STEP QUEST Generator.
 Return ONLY ONE valid JSON object.
-Make a playable tree for Samantha with decision steps and endings.
-Each terminal choice needs: next_step null, ending_title, ending_text, effects, optional perk_add.
-Branch at least once. English. TheFixer sissification lore only. Only JSON.
+Make exactly 1 step named step1 with exactly 2 terminal choices.
+Both choices have next_step null, ending_title, ending_text, effects.
+The quest must end after the first player choice. No step2. English. Only JSON.
 """,
         "npc_full": "You are NPC dialogue generator. Generate FULL dialogue of 4 exchanges between NPC {fname} {sname} (group {bio_group}, whore={iswhore}) and Samantha (former man, fem {fem}%%). JSON: {{\"dialogue\": [{\"role\": \"npc\", \"text\": \"...\"}, {{\"role\": \"player_options\", \"options\": [\"reply1\", \"reply2\"]}}, {{\"role\": \"npc\", \"text\": \"...\"}}, ...]}} 8 entries (4 npc, 4 player_options). English, short, NSFW ok, remember past. Only JSON.",
         "dirty_batch": "Generate 5 dirty talk phrases for sex type {sex_type} with {npc_name}, fem {fem}%%, desire {desire}%%. JSON array: [\"phrase1\", \"phrase2\", \"phrase3\", \"phrase4\", \"phrase5\"] from foreplay to cum, in order, dominant, English, NSFW explicit. Only JSON array.",
@@ -2192,7 +2662,8 @@ label ai_gen_event:
                         print("full quest branch err: %s" % e)
                         full_q = None
 
-                if full_q and ai_dict_like(full_q) and full_q.get('steps') and len(full_q['steps']) >= 2:
+                _min_q_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
+                if full_q and ai_dict_like(full_q) and full_q.get('steps') and len(full_q['steps']) >= _min_q_steps:
                     store.ai_full_quest_data = full_q
                     first_step = full_q['steps'][0]
                     store.ai_full_quest_current_step = first_step.get('id', 'step1')
@@ -2231,6 +2702,10 @@ label ai_gen_event:
                     # Если нет — только тогда single-event / error fallbacks.
                     try:
                         full_q = ai_make_local_quest_tree(gs)
+                        try:
+                            full_q['_llm_failed_reason'] = u'generate_full_quest returned no acceptable quest'
+                        except Exception:
+                            pass
                         store.ai_full_quest_data = full_q
                         first_step = full_q['steps'][0]
                         store.ai_full_quest_current_step = first_step.get('id', 'step1')
@@ -2519,7 +2994,7 @@ screen ai_event_screen(evt_obj=None):
                                 spacing 8
                                 yalign 1.0
                                 if _ui_choices:
-                                    for idx, ch in enumerate(_ui_choices[:3]):
+                                    for idx, ch in enumerate(_ui_choices[:2] if _ui_is_quest else _ui_choices[:3]):
                                         python:
                                             _choice_txt = u"..."
                                             try:
@@ -2687,7 +3162,7 @@ label ai_event_choice:
                                         print("Prefetched next level %s" % nxt.get('title', ''))
                                 except Exception as e:
                                     print("Prefetch next level err %s" % e)
-                            for i, ch2 in enumerate(next_evt.get('choices', [])[:3]):
+                            for i, ch2 in enumerate(next_evt.get('choices', [])[:2]):
                                 ct = ch2.get('text', '') if hasattr(ch2, 'get') else str(ch2)
                                 import threading
                                 threading.Thread(target=_prefetch_next_level, args=(i, ct)).start()
