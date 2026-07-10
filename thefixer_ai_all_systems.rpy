@@ -24,7 +24,7 @@
 # НОВОЕ: Перевод событий на полностью бесцензурную модель Dirty-Muse для снятия ограничений ИИ на насилие и жесткий NSFW!
 
 init python:
-    import json, re, os, base64, ast, threading
+    import json, re, os, base64, ast, threading, codecs
     import random as py_random
 
     # Поддержка двойной совместимости Python 2 (RenPy 7) и Python 3 (RenPy 8)
@@ -40,6 +40,30 @@ init python:
     
     # Для полной свободы генерации жесткого NSFW и насилия используем бесцензурную Dirty-Muse вместо стандартной llama!
     OLLAMA_MODEL_JSON = "hf.co/mradermacher/Dirty-Muse-Writer-v01-Uncensored-Erotica-NSFW-i1-GGUF:i1-IQ2_XS"
+
+    # ===== GPU-ПРОФИЛЬ ДЛЯ OLLAMA (ноутбук с RTX 3050 4GB) =====
+    # ВАЖНО: выбор конкретной видеокарты всё равно делается на стороне сервера Ollama
+    # через переменные среды Windows (CUDA_VISIBLE_DEVICES / GGML_VK_VISIBLE_DEVICES / OLLAMA_LLM_LIBRARY).
+    # Эти параметры ниже делают сами ЗАПРОСЫ более дружелюбными к маленькой VRAM и
+    # просят Ollama максимально выгружать слои модели на GPU вместо ЦП.
+    OLLAMA_FORCE_GPU = True
+    OLLAMA_GPU_LAYERS = 99          # 99 = просим Ollama выгрузить на GPU максимум слоёв, сколько влезет
+    OLLAMA_LOW_VRAM = True          # более щадящий режим под 4GB VRAM
+    OLLAMA_NUM_THREAD = 4           # не душим CPU лишними потоками, когда часть работы уйдёт на GPU
+    OLLAMA_NUM_BATCH = 32           # меньше batch => меньше риск вывалиться из VRAM в RAM/CPU
+    OLLAMA_NUM_CTX = 1536           # ещё чуть меньше контекст, чтобы стабильно помещаться в 4GB
+
+    # SAFE MODE для слабой/маленькой VRAM:
+    # - отключает тяжёлую фоновую магию, которая забивает очередь Ollama
+    # - отключает полные цепочки квестов и берёт более лёгкие одиночные события
+    # - сериализует все запросы к Ollama одним глобальным lock, чтобы не было 5-10 одновременных потоков
+    AI_LOW_VRAM_SAFE_MODE = True
+    AI_ENABLE_FULL_QUEST_CHAIN = False
+    AI_EVENT_MAX_TOKENS = 420
+    AI_PREFETCH_MAX_TOKENS = 280
+    AI_EVENT_DEBUG = True
+    AI_PATCH_BUILD = "2026-07-10-uifix3"
+    ai_ollama_global_lock = threading.Lock()
 
     # Текстовые описания 3D-окружения на основе скриншотов из папки Фотографии (для погружения ИИ в обстановку)
     AI_LOCATION_DESCRIPTIONS = {
@@ -94,12 +118,54 @@ init python:
         # Дублируем фигурные скобки, чтобы RenPy выводил их как литералы и не пытался парсить как теги текста
         return text.replace("{", "{{").replace("}", "}}")
 
+    def ai_write_debug_file(filename, text):
+        try:
+            if text is None:
+                text = u""
+            if not isinstance(text, (str, unicode)):
+                text = unicode(text)
+            fh = codecs.open(filename, "w", "utf-8")
+            fh.write(text)
+            fh.close()
+        except Exception as e:
+            print("ai_write_debug_file err: %s" % e)
+
+    def ai_set_event_debug(reason, raw=None, parsed=None):
+        try:
+            store.ai_debug_last_event_reason = unicode(reason)
+            if raw is None:
+                raw = getattr(store, 'ai_debug_last_json_raw', u"")
+            store.ai_debug_last_json_raw = unicode(raw) if raw is not None else u""
+            parsed_text = u""
+            if parsed is not None:
+                try:
+                    parsed_text = json.dumps(parsed, ensure_ascii=False, indent=2)
+                except:
+                    parsed_text = unicode(parsed)
+            dump = u"[BUILD]\n%s\n\n[REASON]\n%s\n\n[RAW]\n%s\n\n[PARSED]\n%s\n" % (
+                AI_PATCH_BUILD,
+                store.ai_debug_last_event_reason,
+                store.ai_debug_last_json_raw,
+                parsed_text
+            )
+            ai_write_debug_file("ai_event_debug.txt", dump)
+        except Exception as e:
+            print("ai_set_event_debug err: %s" % e)
+
     # Сброс и очистка переменных состояния квестов во избежание залипания шагов
     def ai_reset_quest_state():
         store.ai_full_quest_data = None
         store.ai_full_quest_current_step = "step1"
         store.ai_prefetched = {}
         store.ai_pending_event = None
+        store.ai_event_ui_cache = None
+        store.ai_event_title = u"Событие"
+        store.ai_event_desc = u"..."
+        store.ai_event_choices = []
+        store.ai_event_outfit_items = []
+        store.ai_event_is_quest = False
+        store.ai_event_qtitle = u""
+        store.ai_event_qdesc = u""
         store._has_next = False
         store._automatic_event_active = False
         store.ai_current_automatic_event = None
@@ -365,11 +431,35 @@ Guidelines:
                 pass
 
         messages=[{"role":"system","content":sys_prompt},{"role":"user","content":user_prompt}]
-        # Снижен контекст до 2048, чтобы модель + KV Cache гарантированно влезали в 4Гб VRAM твоей 3050 Ti без выгрузки на ЦП!
-        payload={"model":model,"messages":messages,"stream":False,"options":{"temperature":temp,"top_p":0.92,"num_predict":max_tokens,"num_ctx":2048}}
+        
+        # GPU-friendly настройки запроса под RTX 3050 4GB:
+        # - маленький num_ctx и num_batch уменьшают VRAM pressure
+        # - num_gpu=99 просит Ollama вынести на GPU максимум слоёв, сколько реально влезет
+        # - low_vram помогает не скатываться в тяжелый CPU fallback при нехватке памяти
+        req_options={
+            "temperature": temp,
+            "top_p": 0.92,
+            "num_predict": max_tokens,
+            "num_ctx": OLLAMA_NUM_CTX,
+            "num_thread": OLLAMA_NUM_THREAD,
+            "num_batch": OLLAMA_NUM_BATCH
+        }
+        if OLLAMA_FORCE_GPU:
+            req_options["num_gpu"] = OLLAMA_GPU_LAYERS
+            req_options["low_vram"] = OLLAMA_LOW_VRAM
+        
+        payload={"model":model,"messages":messages,"stream":False,"options":req_options}
         if want_json:
             payload["format"]="json"
+        lock_acquired = False
+        raw_content = None
         try:
+            # Один глобальный lock на все запросы к Ollama.
+            # На слабом железе это НАМНОГО стабильнее, чем десятки одновременных фоновых запросов,
+            # из-за которых ручной квест может висеть в очереди бесконечно долго.
+            ai_ollama_global_lock.acquire()
+            lock_acquired = True
+
             data=json.dumps(payload).encode('utf-8')
             req=urllib2.Request(OLLAMA_URL, data=data, headers={'Content-Type':'application/json'})
             # Увеличен таймаут до 120 секунд во избежание сброса соединения на медленных CPU
@@ -378,6 +468,11 @@ Guidelines:
             content=res['message']['content']
             
             if want_json:
+                raw_content = content
+                try:
+                    store.ai_debug_last_json_raw = unicode(raw_content)
+                except:
+                    pass
                 content=re.sub(r'```json|```','',content).strip()
                 # Умный парсинг для предотвращения усечения списков в словари (баг с {...} внутри [...])
                 f_curly = content.find('{')
@@ -392,7 +487,11 @@ Guidelines:
                     if l_curly != -1:
                         content = content[f_curly:l_curly+1]
                 
-                parsed_json = json.loads(content)
+                try:
+                    parsed_json = json.loads(content)
+                except Exception as je:
+                    print("AI JSON parse error %s: %s | raw=%s" % (model, je, raw_content[:800] if raw_content else ""))
+                    return "__ERROR_JSON__ %s" % je
                 if task_desc:
                     try:
                         store.ai_notify_queue.append(u"ИИ: (%s) успешно готов!" % task_desc)
@@ -419,6 +518,12 @@ Guidelines:
             elif "111" in err_msg or "connection refused" in err_msg.lower() or "timed out" in err_msg.lower():
                 return "__ERROR_OLLAMA_OFFLINE__"
             return "__ERROR__ %s" % err_msg
+        finally:
+            if lock_acquired:
+                try:
+                    ai_ollama_global_lock.release()
+                except:
+                    pass
 
     def get_state():
         s={}
@@ -616,8 +721,19 @@ Guidelines:
 
     def ai_filter_event_by_comfort(event):
         try:
-            from ai_config_tags import AI_COMFORT_DICT
+            from ai_config_tags import AI_COMFORT_DICT, ai_event_has_hard_blocked_content
             from ai_config_locations import ai_is_theme_allowed_in_location
+
+            # Централизованный неотключаемый safety-block.
+            # Он вынесен из промптов в единое место архитектуры и применяется ко всем событиям после генерации.
+            if ai_event_has_hard_blocked_content(event):
+                print("Event blocked by centralized hard safety filter")
+                try:
+                    ai_set_event_debug(u"Event was blocked by centralized hard safety filter", parsed=event)
+                except:
+                    pass
+                return False
+
             tags = event.get('tags', [])
             if not tags:
                 type_to_tag = {
@@ -865,15 +981,20 @@ Write only in English, dominant, dirty, short, commanding.
 
 Write only in English, dominant, dirty, short, commanding.
 """,
-        "event": """You are TheFixer Event Generator. Generate a single event as JSON: title (English), description (English, 2-4 sentences, second person), type, outfit_suggestion {items:[item_top_22,...], reason}, is_quest bool, quest_title, quest_desc, choices[{text (English), effects{confidence,corrupt,desire,mood,fitness,femininity,money,perk_add,give_item}, spicy_modifier: integer (+10 for naughty/slutty/provocative, -10 for polite/vanilla)}].
-STRICT LORE RULES & INSTRUCTIONS:
-- Read her "Active Perks/Traits" context. If she has traits like "Public Prostitute" or "Neck Cuts" or others, make NPCs react directly to them! For example, people might slut-shame her, point at her visible cuts, refer to her as a prostitute, or give her tasks based on her reputation.
-- Choices can dynamically grant new permanent perks/traits to the player inside the "effects" dictionary using the key "perk_add". It can be a string name like "perk_add": "Public Prostitute", or a detailed dictionary like "perk_add": {"name": "Neck Cuts", "desc": "Fresh, raw cuts on her neck...", "type": "allure", "add": 5}.
-- Do NOT generate generic mystery, fantasy, adventure, or puzzle-solving quests (absolutely NO "ancient secrets", "mysterious portals", "intriguing puzzles", "long-lost secrets", "mysterious gathering").
-- Keep the event and quest strictly grounded in TheFixer sissification lore: body transformation, crossdressing, public exhibitionism, teasing, pleasing partners, and submissiveness.
-- Focus on daily training tasks, modeling outfits, public embarrassment, or gaining reputation with local factions (Wolf Pack, Mean Girls, Pub, etc.).
-- Outfit items must be real: item_top_22 SHEER DROP TOP, item_bottom_15 PLEATED MINI SKIRT, item_outfit_16 CASINO DRESS, etc.
-- All text must be in English. Only JSON.
+        "event": """You are TheFixer Event Generator.
+Return ONLY ONE valid JSON object. No markdown. No prose outside JSON.
+Schema:
+{"title":"...","description":"...","type":"femininity/social/corruption/work/horny/institute","tags":["femininity"],"outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"..."},"is_quest":false,"quest_title":"","quest_desc":"","choices":[{"text":"...","effects":{"femininity":2},"spicy_modifier":0},{"text":"...","effects":{"confidence":1},"spicy_modifier":-5}]}
+Rules:
+- Description: 2 short English sentences.
+- Choices: exactly 2 or 3.
+- Keep JSON compact and simple.
+- If unsure, use empty arrays/empty strings, but keep valid JSON.
+- Grounded only in TheFixer daily sissification, teasing, outfits, embarrassment, submissiveness, and local factions.
+- No mysteries, no fantasy, no puzzles, no portals.
+- If using outfit items, use real item ids like item_top_22, item_bottom_15.
+- Make NPCs react to active perks/traits if relevant.
+Only JSON.
 """,
         "npc_chat": u"""You are NPC in TheFixer. Roleplay as given NPC. Know Samantha is former man, femininity %d%%. Speak as NPC would. Keep memory of past talks. English, short. At end add tag [FEMININITY+1] etc.
 SPECIAL RULE: If you want to invite Samantha to meet up, give her a task/quest, or trigger a 3D gameplay event with her, append the tag [EVENT] at the very end of your response.
@@ -981,6 +1102,16 @@ default ai_time_event_chance = 10          # Нарастающий ежечас
 
 # RECENT GG ACTIONS TRACKING (Трекинг действий Саманты для контекста ИИ)
 default ai_recent_actions = []             # Список последних 8 действий Sammy
+default ai_debug_last_event_reason = ""
+default ai_debug_last_json_raw = ""
+default ai_event_ui_cache = None
+default ai_event_title = "Событие"
+default ai_event_desc = "..."
+default ai_event_choices = []
+default ai_event_outfit_items = []
+default ai_event_is_quest = False
+default ai_event_qtitle = ""
+default ai_event_qdesc = ""
 
 # CHAT WITH BROOKER
 label ai_chat_brooker:
@@ -1132,14 +1263,15 @@ label ai_gen_event:
                     allowed_tags_str = "femininity, crossdressing, humiliation"
 
                 full_q = None
-                try:
-                    gs['spicy_level'] = spicy_level
-                    gs['is_spicy'] = is_spicy
-                    gs['allowed_tags'] = allowed_tags_str
-                    gs['spicy_chance'] = spicy_chance
-                    full_q = generate_full_quest(gs)
-                except:
-                    full_q = None
+                if AI_ENABLE_FULL_QUEST_CHAIN and not AI_LOW_VRAM_SAFE_MODE:
+                    try:
+                        gs['spicy_level'] = spicy_level
+                        gs['is_spicy'] = is_spicy
+                        gs['allowed_tags'] = allowed_tags_str
+                        gs['spicy_chance'] = spicy_chance
+                        full_q = generate_full_quest(gs)
+                    except:
+                        full_q = None
 
                 if full_q and 'steps' in full_q and len(full_q['steps'])>=2:
                     store.ai_full_quest_data = full_q
@@ -1160,27 +1292,39 @@ label ai_gen_event:
                         "spicy_level": spicy_level
                     }
                     evt = ai_normalize_event(evt)
+                    ai_set_event_debug(u"Full quest step parsed successfully", parsed=evt)
                     if not ai_filter_event_by_comfort(evt):
+                        ai_set_event_debug(u"Full quest event was blocked by comfort/location filter", parsed=evt)
                         evt={"title":"Morning","description":"You woke up, wonderful day, fem %s%%. Time %s, location %s. Try new outfit." % (gs['fem'], gs['timeofday'], gs['location']),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear it","effects":{"femininity":4}},{"text":"Don't wear","effects":{"femininity":-2}}]}
                         evt = ai_normalize_event(evt)
                     store.ai_pending_event=evt
                 else:
-                    prompt="fem=%s%% conf=%s loc=%s outfit=%s perks=%s hour=%s timeofday=%s spicy_level=%s/10 is_spicy=%s allowed_tags=%s inventory=%s quests=%s. Generate event with tags from allowed_tags only. If spicy_level>5 make spicy NSFW, if <3 vanilla. JSON." % (gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], spicy_level, is_spicy, allowed_tags_str, gs.get('inventory',''), gs.get('active_quests',''))
-                    evt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.88, max_tokens=700, task_desc=u"Событие для " + gs.get('location','home'))
+                    prompt="fem=%s%% conf=%s loc=%s outfit=%s perks=%s hour=%s timeofday=%s spicy_level=%s/10 is_spicy=%s allowed_tags=%s inventory=%s quests=%s. Generate ONE short grounded event with 2-3 choices only. Keep description concise. JSON." % (gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], spicy_level, is_spicy, allowed_tags_str, gs.get('inventory',''), gs.get('active_quests',''))
+                    evt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.35, max_tokens=AI_EVENT_MAX_TOKENS, task_desc=u"Событие для " + gs.get('location','home'))
                     if evt == "__ERROR_MODEL_NOT_FOUND__":
+                        ai_set_event_debug(u"Model not found for event generation")
                         evt = {"title": "Error: Model Not Found", "description": "Модель ИИ '%s' не загружены. Сделайте 'ollama pull %s'" % (OLLAMA_MODEL_JSON, OLLAMA_MODEL_JSON), "choices": [{"text": "Продолжить без мода", "effects": {}}]}
                     elif evt == "__ERROR_OLLAMA_OFFLINE__":
+                        ai_set_event_debug(u"Ollama offline during event generation")
                         evt = {"title": "Error: Ollama Offline", "description": "Не удалось соединиться с Ollama на http://localhost:11434. Проверьте запущен ли сервер.", "choices": [{"text": "Продолжить без мода", "effects": {}}]}
+                    elif isinstance(evt, str) and evt.startswith("__ERROR_JSON__"):
+                        ai_set_event_debug(u"Event JSON parse error")
+                        evt = {"title":"AI JSON Error","description":"Ollama ответила, но прислала битый JSON. Открой ai_event_debug.txt в папке game и пришли его мне.","type":"error","outfit_suggestion":{"items":[]},"is_quest":False,"choices":[{"text":"OK","effects":{}}]}
                     elif not evt or (isinstance(evt, str) and evt.startswith("__ERROR__")):
+                        ai_set_event_debug(u"Generic event generation fallback: invalid/empty event object")
                         evt={"title":"Mirror","description":"Mirror reflexions: Fem %s%%. You in %s. Time is %s, location %s. Challenge ready." % (gs['fem'], gs['outfit'], gs['timeofday'], gs['location']),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear it","effects":{"femininity":4}},{"text":"Don't wear","effects":{"femininity":-2}}]}
+                    else:
+                        ai_set_event_debug(u"Event parsed successfully", parsed=evt)
                     
                     evt = ai_normalize_event(evt)
                     if isinstance(evt, dict) and 'choices' in evt:
                         if not ai_filter_event_by_comfort(evt):
+                            ai_set_event_debug(u"Event was blocked by comfort/location filter", parsed=evt)
                             evt={"title":"Morning","description":"Wonderful day, fem %s%%. Try new outfit." % gs['fem'],"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"]},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear","effects":{"femininity":3}}]}
                             evt = ai_normalize_event(evt)
                     store.ai_pending_event=evt
             except Exception as e:
+                ai_set_event_debug(u"Unhandled exception in event thread: %s" % e)
                 store.ai_pending_event=ai_normalize_event({"title":"Error","description":"Institute offline: %s" % e,"type":"error","outfit_suggestion":{"items":[]},"is_quest":False,"choices":[{"text":"OK","effects":{}}]})
             renpy.restart_interaction()
         import threading
@@ -1210,11 +1354,21 @@ label ai_event_poll:
         python:
             evt=ai_pending_event
             if isinstance(evt, dict):
+                evt = ai_normalize_event(evt)
                 if evt.get('outfit_suggestion',{}).get('items'):
                     auto_equip(evt['outfit_suggestion']['items'])
                 if evt.get('npc_involved',{}).get('generate_new'):
                     spawn_npc(evt['npc_involved'])
-                ai_last_event=evt
+                store.ai_last_event = evt
+                store.ai_event_ui_cache = evt
+                store.ai_event_title = unicode(evt.get('title', u'Событие'))
+                store.ai_event_desc = unicode(evt.get('description', u'...'))
+                store.ai_event_choices = evt.get('choices', [])
+                store.ai_event_outfit_items = evt.get('outfit_suggestion',{}).get('items',[])
+                store.ai_event_is_quest = evt.get('is_quest', False)
+                store.ai_event_qtitle = unicode(evt.get('quest_title', u''))
+                store.ai_event_qdesc = unicode(evt.get('quest_desc', u''))
+                ai_set_event_debug(u"Final event staged for UI", parsed={"title": store.ai_event_title, "description": store.ai_event_desc, "choices": store.ai_event_choices})
                 ai_events.append(evt)
                 if evt.get('is_quest'):
                     ai_quests.append({"title":evt.get('quest_title',evt['title']),"desc":evt.get('quest_desc',evt['description']),"outfit":evt.get('outfit_suggestion'),"status":"active","rewards":{"femininity":6,"money":150}})
@@ -1222,35 +1376,36 @@ label ai_event_poll:
             ai_event_thinking=False
             
             # Фоновая предзагрузка следующих выборов
-            try:
-                ai_prefetched={}
-                def _prefetch_choice(choice_idx, choice_text):
-                    try:
-                        gs=get_state()
-                        cont_prompt="Previous event: %(title)s - %(desc)s. Player chose: %(choice)s. Fem %(fem)s%%. Generate NEXT step as JSON event same schema. STRICT RULES: Do NOT use '...' or any placeholders. Write real titles and descriptions." % {
-                            'title': evt.get('title',''),
-                            'desc': evt.get('description','')[:200],
-                            'choice': choice_text[:100],
-                            'fem': gs['fem']
-                        }
-                        next_evt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont_prompt, want_json=True, temp=0.88, max_tokens=600, task_desc=u"Разветвление квеста")
-                        if next_evt and isinstance(next_evt, dict) and not next_evt.get('title', '').startswith("__ERROR"):
-                            store.ai_prefetched[choice_idx]=ai_normalize_event(next_evt)
-                            print("Prefetched choice %s: %s" % (choice_idx, next_evt.get('title','')))
-                    except Exception as e:
-                        print("Prefetch error %s" % e)
-                if isinstance(evt, dict) and 'choices' in evt:
-                    for idx, ch in enumerate(evt.get('choices',[])[:3]):
-                        ctext=ch.get('text','') if hasattr(ch, 'get') else str(ch)
-                        import threading
-                        threading.Thread(target=_prefetch_choice, args=(idx, ctext)).start()
-            except Exception as e:
-                print("Prefetch setup error %s" % e)
-        call screen ai_event_screen
+            if not AI_LOW_VRAM_SAFE_MODE:
+                try:
+                    ai_prefetched={}
+                    def _prefetch_choice(choice_idx, choice_text):
+                        try:
+                            gs=get_state()
+                            cont_prompt="Previous event: %(title)s - %(desc)s. Player chose: %(choice)s. Fem %(fem)s%%. Generate NEXT short JSON event same schema. Keep it concise and valid JSON." % {
+                                'title': evt.get('title',''),
+                                'desc': evt.get('description','')[:200],
+                                'choice': choice_text[:100],
+                                'fem': gs['fem']
+                            }
+                            next_evt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont_prompt, want_json=True, temp=0.82, max_tokens=AI_PREFETCH_MAX_TOKENS, task_desc=u"Разветвление квеста")
+                            if next_evt and isinstance(next_evt, dict) and not next_evt.get('title', '').startswith("__ERROR"):
+                                store.ai_prefetched[choice_idx]=ai_normalize_event(next_evt)
+                                print("Prefetched choice %s: %s" % (choice_idx, next_evt.get('title','')))
+                        except Exception as e:
+                            print("Prefetch error %s" % e)
+                    if isinstance(evt, dict) and 'choices' in evt:
+                        for idx, ch in enumerate(evt.get('choices',[])[:3]):
+                            ctext=ch.get('text','') if hasattr(ch, 'get') else str(ch)
+                            import threading
+                            threading.Thread(target=_prefetch_choice, args=(idx, ctext)).start()
+                except Exception as e:
+                    print("Prefetch setup error %s" % e)
+        jump ai_event_choice
     else:
         call screen ai_event_loading_screen
 
-screen ai_event_screen():
+screen ai_event_screen(evt_obj=None):
     modal True
     zorder 3000
     add Solid("#000000dd")
@@ -1288,7 +1443,7 @@ screen ai_event_screen():
                             except:
                                 _corrupt_val = 0
                             try:
-                                outfit_items = ai_last_event.get('outfit_suggestion',{}).get('items',[]) if ai_last_event else []
+                                outfit_items = getattr(store, 'ai_event_outfit_items', [])
                                 _names = []
                                 for iid in outfit_items:
                                     try:
@@ -1317,15 +1472,7 @@ screen ai_event_screen():
                     frame:
                         background "#2a1a3a" xfill True ysize 60
                         python:
-                            _evt_title = ""
-                            try:
-                                if ai_last_event:
-                                    _evt_title = ai_last_event.get('title', u'Событие')
-                                else:
-                                    _evt_title = u"Событие"
-                            except:
-                                _evt_title = u"Событие"
-                            _evt_title = ai_escape_renpy_text(_evt_title)
+                            _evt_title = ai_escape_renpy_text(getattr(store, 'ai_event_title', u'Событие'))
                         vbox:
                             text "[_evt_title]" size 18 bold True color "#ff88cc"
                     frame:
@@ -1334,29 +1481,14 @@ screen ai_event_screen():
                             scrollbars "vertical" mousewheel True
                             vbox:
                                 python:
-                                    _evt_desc = ""
-                                    try:
-                                        if ai_last_event:
-                                            _evt_desc = ai_last_event.get('description','...')
-                                        else:
-                                            _evt_desc = "..."
-                                    except:
-                                        _evt_desc = "..."
-                                    _evt_desc = ai_escape_renpy_text(_evt_desc)
+                                    _evt_desc = ai_escape_renpy_text(getattr(store, 'ai_event_desc', u'...'))
                                 text "[_evt_desc]" size 16 color "#e0e0ff"
-                                if ai_last_event and ai_last_event.get('is_quest'):
+                                if getattr(store, 'ai_event_is_quest', False):
                                     frame:
                                         background "#0a2a0a"
                                         python:
-                                            _q_title = ""
-                                            _q_desc = ""
-                                            try:
-                                                _q_title = ai_last_event.get('quest_title','')
-                                                _q_desc = ai_last_event.get('quest_desc','')
-                                            except:
-                                                pass
-                                            _q_title = ai_escape_renpy_text(_q_title)
-                                            _q_desc = ai_escape_renpy_text(_q_desc)
+                                            _q_title = ai_escape_renpy_text(getattr(store, 'ai_event_qtitle', u''))
+                                            _q_desc = ai_escape_renpy_text(getattr(store, 'ai_event_qdesc', u''))
                                         vbox:
                                             text "Квест: [_q_title]" size 12 color "#88ff88"
                                             text "[_q_desc]" size 12 color "#88ff88"
@@ -1369,7 +1501,7 @@ screen ai_event_screen():
                                 xfill True
                                 spacing 8
                                 yalign 1.0
-                                for idx, ch in enumerate((ai_last_event.get('choices',[]) if ai_last_event else [])[:3]):
+                                for idx, ch in enumerate(getattr(store, 'ai_event_choices', [])[:3]):
                                     python:
                                         _choice_txt = "..."
                                         try:
@@ -1381,7 +1513,7 @@ screen ai_event_screen():
                                 textbutton "Пропустить" action Return(-1) xfill True background "#1a1a1a" text_size 12
 
 label ai_event_choice:
-    call screen ai_event_screen
+    call screen ai_event_screen(store.ai_event_ui_cache)
     $ event_choice_result = _return
     if event_choice_result < 0:
         $ renpy.notify("Квест отложен")
@@ -1395,7 +1527,11 @@ label ai_event_choice:
 
     python:
         try:
-            ch = ai_last_event['choices'][event_choice_result] if ai_last_event and event_choice_result < len(ai_last_event.get('choices',[])) else {}
+            _cur_evt = getattr(store, 'ai_event_ui_cache', None)
+            if _cur_evt is None:
+                _cur_evt = getattr(store, 'ai_last_event', None)
+            _choices = getattr(store, 'ai_event_choices', None) or (_cur_evt.get('choices',[]) if _cur_evt else [])
+            ch = _choices[event_choice_result] if _choices and event_choice_result < len(_choices) else {}
             eff = ch.get('effects',{}) if hasattr(ch, 'get') else {}
             p=player
             if 'confidence' in eff:
@@ -1440,12 +1576,12 @@ label ai_event_choice:
                         ai_add_dynamic_perk(p_name, p_desc, p_type, p_val)
 
             # Запоминаем выбор во взаимоотношениях с персонажем (ДОЛГОСРОЧНАЯ ПАМЯТЬ)
-            if ai_last_event.get('npc_involved'):
-                npc_info = ai_last_event['npc_involved']
+            if _cur_evt and _cur_evt.get('npc_involved'):
+                npc_info = _cur_evt['npc_involved']
                 npc_fname = npc_info.get('fname', '').lower()
                 if npc_fname:
                     choice_text = ch.get('text', 'completed action')
-                    memory_entry = u"Samantha chose: '%s' during event: '%s' (%s)" % (choice_text, ai_last_event.get('title'), ai_last_event.get('description')[:120])
+                    memory_entry = u"Samantha chose: '%s' during event: '%s' (%s)" % (choice_text, _cur_evt.get('title'), _cur_evt.get('description')[:120])
                     if npc_fname not in store.ai_npc_memories:
                         store.ai_npc_memories[npc_fname] = []
                     store.ai_npc_memories[npc_fname].append(memory_entry)
@@ -1486,6 +1622,14 @@ label ai_event_choice:
                 if next_evt.get('outfit_suggestion',{}).get('items'):
                     auto_equip(next_evt['outfit_suggestion']['items'])
                 store.ai_last_event=next_evt
+                store.ai_event_ui_cache=next_evt
+                store.ai_event_title = unicode(next_evt.get('title', u'Событие'))
+                store.ai_event_desc = unicode(next_evt.get('description', u'...'))
+                store.ai_event_choices = next_evt.get('choices', [])
+                store.ai_event_outfit_items = next_evt.get('outfit_suggestion',{}).get('items',[])
+                store.ai_event_is_quest = next_evt.get('is_quest', False)
+                store.ai_event_qtitle = unicode(next_evt.get('quest_title', u''))
+                store.ai_event_qdesc = unicode(next_evt.get('quest_desc', u''))
                 store.ai_events.append(next_evt)
                 try:
                     if event_choice_result in store.ai_prefetched:
@@ -1493,23 +1637,24 @@ label ai_event_choice:
                 except: pass
                 
                 # Предзагрузка следующего уровня ветки в фоне
-                try:
-                    def _prefetch_next_level(idx, txt):
-                        try:
-                            gs=get_state()
-                            cont="Prev step: %s - %s. Chose: %s. Fem %s%%. Generate NEXT step JSON. STRICT RULES: Do NOT use '...' or any placeholders. Write real titles and descriptions." % (next_evt.get('title',''), next_evt.get('description','')[:200], txt[:100], gs['fem'])
-                            nxt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont, want_json=True, temp=0.88, max_tokens=600, task_desc=u"Разветвление уровня")
-                            if nxt and isinstance(nxt, dict) and not nxt.get('title', '').startswith("__ERROR"):
-                                store.ai_prefetched[idx]=ai_normalize_event(nxt)
-                                print("Prefetched next level %s" % nxt.get('title',''))
-                        except Exception as e:
-                            print("Prefetch next level err %s" % e)
-                    for i,ch2 in enumerate(next_evt.get('choices',[])[:3]):
-                        ct=ch2.get('text','') if hasattr(ch2, 'get') else str(ch2)
-                        import threading
-                        threading.Thread(target=_prefetch_next_level, args=(i, ct)).start()
-                except Exception as e:
-                    print("Prefetch next setup %s" % e)
+                if not AI_LOW_VRAM_SAFE_MODE:
+                    try:
+                        def _prefetch_next_level(idx, txt):
+                            try:
+                                gs=get_state()
+                                cont="Prev step: %s - %s. Chose: %s. Fem %s%%. Generate NEXT short JSON step. Keep it concise and valid JSON." % (next_evt.get('title',''), next_evt.get('description','')[:200], txt[:100], gs['fem'])
+                                nxt=ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont, want_json=True, temp=0.82, max_tokens=AI_PREFETCH_MAX_TOKENS, task_desc=u"Разветвление уровня")
+                                if nxt and isinstance(nxt, dict) and not nxt.get('title', '').startswith("__ERROR"):
+                                    store.ai_prefetched[idx]=ai_normalize_event(nxt)
+                                    print("Prefetched next level %s" % nxt.get('title',''))
+                            except Exception as e:
+                                print("Prefetch next level err %s" % e)
+                        for i,ch2 in enumerate(next_evt.get('choices',[])[:3]):
+                            ct=ch2.get('text','') if hasattr(ch2, 'get') else str(ch2)
+                            import threading
+                            threading.Thread(target=_prefetch_next_level, args=(i, ct)).start()
+                    except Exception as e:
+                        print("Prefetch next setup %s" % e)
                 store._has_next = True
                 renpy.notify(u"Следующий шаг готов (предзагружен)")
             else:
@@ -2219,6 +2364,8 @@ label ai_all_after_load_fix:
 init python:
     # 1. Функция фоновой префетч-загрузки SMS С ПОТОКОБЕЗОПАСНОЙ БЛОКИРОВКОЙ
     def ai_start_prefetch_sms():
+        if AI_LOW_VRAM_SAFE_MODE:
+            return
         if getattr(store, 'ai_sms_prefetch_in_progress', False):
             return
             
@@ -2306,6 +2453,10 @@ init python:
                 spawn_npc(npc_data)
             except Exception as e:
                 print("Spawn queue process err: %s" % e)
+
+        # SAFE MODE: не запускаем тяжёлые фоновые LLM-задачи, чтобы ручные квесты/чаты не висели в очереди.
+        if AI_LOW_VRAM_SAFE_MODE:
+            return
 
         if ai_is_safe_to_trigger():
             cur_loc_name = getattr(store.loc_cur, 'name', str(store.loc_cur)) if hasattr(store, 'loc_cur') else ""
@@ -2488,6 +2639,9 @@ init python:
                     store.ai_recent_actions.append(action_msg)
                     # Храним только последние 8 действий, чтобы не перегружать контекст модели
                     store.ai_recent_actions = store.ai_recent_actions[-8:]
+
+                    if AI_LOW_VRAM_SAFE_MODE:
+                        return _orig_travel_walk(location, *args, **kwargs)
                     
                     def _prefetch_location_event():
                         try:
@@ -2541,15 +2695,23 @@ init python:
 # LABEL ДЛЯ ЗАПУСКА АВТОМАТИЧЕСКИХ СОБЫТИЙ
 label ai_trigger_automatic_event_label:
     $ store._automatic_event_active = True
-    $ ai_last_event = ai_normalize_event(store.ai_current_automatic_event)
-    $ ai_events.append(ai_last_event)
+    $ store.ai_last_event = ai_normalize_event(store.ai_current_automatic_event)
+    $ store.ai_event_ui_cache = store.ai_last_event
+    $ store.ai_event_title = unicode(store.ai_last_event.get('title', u'Событие'))
+    $ store.ai_event_desc = unicode(store.ai_last_event.get('description', u'...'))
+    $ store.ai_event_choices = store.ai_last_event.get('choices', [])
+    $ store.ai_event_outfit_items = store.ai_last_event.get('outfit_suggestion',{}).get('items',[])
+    $ store.ai_event_is_quest = store.ai_last_event.get('is_quest', False)
+    $ store.ai_event_qtitle = unicode(store.ai_last_event.get('quest_title', u''))
+    $ store.ai_event_qdesc = unicode(store.ai_last_event.get('quest_desc', u''))
+    $ ai_events.append(store.ai_last_event)
     
-    if ai_last_event.get('outfit_suggestion',{}).get('items'):
-        $ auto_equip(ai_last_event['outfit_suggestion']['items'])
-    if ai_last_event.get('npc_involved',{}).get('generate_new'):
-        $ spawn_npc(ai_last_event['npc_involved'])
-    if ai_last_event.get('is_quest'):
-        $ ai_quests.append({"title":ai_last_event.get('quest_title',ai_last_event['title']),"desc":ai_last_event.get('quest_desc',ai_last_event['description']),"outfit":ai_last_event.get('outfit_suggestion'),"status":"active","rewards":{"femininity":6,"money":150}})
+    if store.ai_last_event.get('outfit_suggestion',{}).get('items'):
+        $ auto_equip(store.ai_last_event['outfit_suggestion']['items'])
+    if store.ai_last_event.get('npc_involved',{}).get('generate_new'):
+        $ spawn_npc(store.ai_last_event['npc_involved'])
+    if store.ai_last_event.get('is_quest'):
+        $ ai_quests.append({"title":store.ai_last_event.get('quest_title',store.ai_last_event['title']),"desc":store.ai_last_event.get('quest_desc',store.ai_last_event['description']),"outfit":store.ai_last_event.get('outfit_suggestion'),"status":"active","rewards":{"femininity":6,"money":150}})
     
     $ store.ai_current_automatic_event = None # очищаем временный буфер
     
