@@ -60,6 +60,38 @@ init python:
     # Словарь для быстрого доступа
     AI_COMFORT_DICT = {t['id']: t for t in AI_COMFORT_TAGS}
 
+    AI_HARD_BLOCKED_THEMES = [
+        u"none",
+    ]
+
+    def ai_get_forbidden_themes_text():
+        """Собирает единый список запретов: хард-лист + теги с level==0.
+        Отдаётся LLM как раздел [FORBIDDEN THEMES] промпта."""
+        lines = []
+        # 1) хард-лист
+        for t in AI_HARD_BLOCKED_THEMES:
+            try:
+                lines.append(u"- " + unicode(t))
+            except Exception:
+                lines.append(u"- " + str(t))
+        # 2) теги, которые игрок явно отключил в AI_COMFORT_TAGS (level==0)
+        try:
+            for tag in AI_COMFORT_TAGS:
+                if tag.get('level', 2) == 0:
+                    name = tag.get('name') or tag.get('id') or u"?"
+                    desc = tag.get('desc') or u""
+                    try:
+                        line = u"- " + unicode(name)
+                        if desc:
+                            line += u" — " + unicode(desc)
+                        line += u" (disabled by player)"
+                        lines.append(line)
+                    except Exception:
+                        lines.append(u"- " + str(name) + u" (disabled by player)")
+        except Exception:
+            pass
+        return u"\n".join(lines) if lines else u"(none configured)"
+
     def ai_is_tag_allowed(tag_id):
         # Проверяет разрешен ли тег
         t = AI_COMFORT_DICT.get(tag_id)
@@ -90,4 +122,5 @@ init python:
             return False
         except Exception:
             return False
+
 

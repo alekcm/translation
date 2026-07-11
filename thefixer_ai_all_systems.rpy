@@ -64,7 +64,12 @@ init python:
     OLLAMA_LOW_VRAM = True          # более щадящий режим под 4GB VRAM
     OLLAMA_NUM_THREAD = 4           # не душим CPU лишними потоками, когда часть работы уйдёт на GPU
     OLLAMA_NUM_BATCH = 32           # меньше batch => меньше риск вывалиться из VRAM в RAM/CPU
-    OLLAMA_NUM_CTX = 2048           # нормальный контекст для квестов; 2x2 всё равно ограничивает размер дерева
+    # ВНИМАНИЕ: контекст должен быть с ЗАПАСОМ, иначе Ollama молча обрежет
+    # начало user-промпта, и модель забудет, кто такая Саманта.
+    # Прикидка: system(~600) + user(~2200) + предсказание(1200) = ~4000.
+    # Ставим 6144 с запасом на будущее раздутие правил/перков.
+    # Если VRAM 4GB начнёт кидать HTTP 500 — снижай до 4096.
+    OLLAMA_NUM_CTX = 6144
 
     # SAFE MODE для слабой/маленькой VRAM:
     # - отключает тяжёлую фоновую магию, которая забивает очередь Ollama
@@ -74,15 +79,27 @@ init python:
     # Полные деревья квестов: теперь строго 2 уровня выбора (2 -> 2), 4 финала.
     # SAFE_MODE по-прежнему режет фоновый prefetch/SMS/auto, но НЕ рубит цепочки квестов.
     AI_ENABLE_FULL_QUEST_CHAIN = True
-    AI_QUEST_ONE_STEP_TEST_MODE = True  # TEST: квест заканчивается после первого же выбора
+    # Каждый ai_call генерирует ОДИН step + choices. Если игрок выбирает
+    # choice без is_ending — движок делает ЕЩЁ ОДИН ai_call с контекстом
+    # предыдущего шага и выбранного варианта. Так до момента, пока LLM
+    # сама не поставит is_ending=true, или пока не упрёмся в MAX_STEPS.
+    # Это on-demand chain (NOT tree upfront).
+    AI_QUEST_ONE_STEP_TEST_MODE = True   # один step на ai_call — да, но цепочка не ограничена
+    AI_QUEST_MAX_STEPS = 5               # жёсткий потолок: после 5-го шага финал форсируется
     AI_FULL_QUEST_MIN_STEPS = 1
-    AI_FULL_QUEST_MAX_STEPS = 1          # TEST: один экран квеста, выбор сразу завершает ветку
-    AI_FULL_QUEST_MAX_TOKENS = 450       # TEST: короткий одношаговый JSON, чтобы проверить HTTP 500/стабильность
+    AI_FULL_QUEST_MAX_STEPS = 1
+    # РАЗМЕР ОТВЕТА. Раньше стояло 450 — не хватало на длинный
+    # многовариантный сюжет, модель обрывалась на полуслове (см. дампы
+    # вида "Let your.'  effects: {...}"). 1200 хватает на:
+    #   TITLE/DESC + STEP + 2-4 полных CHOICE с EFFECTS + ENDING_TITLE/TEXT.
+    # Ответ: до 5 choices × 6-10 sentence ending + 8-14 sentence step_desc.
+    # На IQ2_XS ~1200-1600 токенов реально. 1800 с запасом.
+    AI_FULL_QUEST_MAX_TOKENS = 1800
     AI_FULL_QUEST_TIMEOUT = 180
     AI_EVENT_MAX_TOKENS = 420
     AI_PREFETCH_MAX_TOKENS = 280
     AI_EVENT_DEBUG = True
-    AI_PATCH_BUILD = "2026-07-10-oneclick-quest-test-cpu-retry"
+    AI_PATCH_BUILD = "2026-07-11-2nd-person-choices+park-toilet-outside"
     ai_ollama_global_lock = threading.Lock()
 
     # Текстовые описания 3D-окружения на основе скриншотов из папки Фотографии (для погружения ИИ в обстановку)
@@ -96,19 +113,25 @@ init python:
         "school_gym": "The school gym. Spacious, smelling of sweat and rubber, with workout gear and soccer boys.",
         "school_locker_girl": "The girls' locker room in school. Clean, with benches, showers, and mirrors. Very private for girls.",
         "school_locker_boy": "The boys' locker room in school. Smelling of sweat and body spray. Highly risky and dangerous to enter.",
-        "school_toilet": "The school restroom. Tile walls, sinks, and private toilet cubicles.",
+        "school_toilet": "OUTSIDE the school restrooms — Samantha is in the hallway at the door, has NOT yet chosen boys' or girls'. She has not entered any stall.",
+        "school_toilet_boy": "INSIDE the school boys' restroom. Urinals, cubicles, tile walls. Risky — she has already entered.",
+        "school_toilet_girl": "INSIDE the school girls' restroom. Sinks, mirrors, private stalls. She has already entered.",
+        "trainstation_local_pub_toilet_boys": "INSIDE the trainstation pub men's restroom. Cramped, dirty tiles, one broken urinal. She has already entered.",
+        "trainstation_local_pub_toilet_girls": "INSIDE the trainstation pub women's restroom. Two stalls, cracked mirror, flickering light. She has already entered.",
         "park_local": "Blaston Park. Green grass fields, walking paths, benches, and tall trees. Beautiful and public.",
-        "park_toilet_boys": "A dingy, tile men's restroom in Blaston Park. Urinals, cubicles, smelling of disinfectant. Risky to enter.",
-        "park_toilet_girls": "The women's restroom in Blaston Park. Tile walls, mirrors, sinks, and private stalls. Safe and private.",
+        "park_toilet": "OUTSIDE the park public restrooms — Samantha is standing at the entrance under the sign, has NOT yet chosen boys' or girls' door. Open air, people walking past, still fully in the park.",
+        "park_toilet_boys": "INSIDE the men's restroom of Blaston Park. Dingy tile walls, urinals, cubicles, disinfectant smell. She has already entered — cornered by whoever comes in.",
+        "park_toilet_girls": "INSIDE the women's restroom of Blaston Park. Tile walls, mirrors, sinks, private stalls. Safe and private — she has already entered.",
         "beach": "The sandy Blaston Beach. Waves washing over the sand, pier nearby, open and sunny. Perfect for swimwear.",
         "beach_water": "The cool water of Blaston Beach. Waves washing over the sand. Ideal for swimming.",
         "beach_gym": "An outdoor beach workout gym. Benches, weights, pull-up bars. Athletic people exercising.",
         "beach_hangout": "The sandy beach hangout spot. People relaxing on towels, sunbathing, or playing volleyball.",
-        "beach_locker_boys": "The beach boys locker room. Rough wooden benches and showers.",
-        "beach_locker_girls": "The beach girls locker room. Benches and privacy screens for changing.",
+        "beach_locker_boys": "INSIDE the beach boys' locker room. Rough wooden benches and showers. She has already entered.",
+        "beach_locker_girls": "INSIDE the beach girls' locker room. Benches and privacy screens for changing. She has already entered.",
         "pub": "The Trainstation local pub. Dim-lit, smelling of beer and tobacco. Bob and Trixie serving, full of local patrons.",
-        "pub_toilet_boys": "The pub men's restroom. Smelling of stale beer and urine, dirty tiles. Highly unsafe.",
-        "pub_toilet_girls": "The pub women's restroom. Sinks, mirrors, tile walls. Dimly lit.",
+        "pub_toilet": "OUTSIDE the pub restrooms — Samantha is in the pub corridor at the doors, has NOT yet chosen boys' or girls'. Music still audible from the main room.",
+        "pub_toilet_boys": "INSIDE the pub men's restroom. Stale beer and urine smell, dirty tiles. Highly unsafe — she has already entered.",
+        "pub_toilet_girls": "INSIDE the pub women's restroom. Sinks, mirrors, tile walls. Dimly lit — she has already entered.",
         "motel": "The local highway motel. Run-down, neon pink signs, private rooms. Hot spot for highway prostitution.",
         "motel_lobby": "The run-down motel lobby. Has a reception counter, keys, and an old clerk.",
         "truckstop": "The local highway truckstop. Large semi trucks parked, diesel smell, truck drivers resting. High sex-work activity.",
@@ -255,9 +278,11 @@ init python:
             evt['title'] = title
 
         choices = evt.get('choices', []) or []
-        # Гарантируем list + dict-like choices с text.
-        # Для квестов строго максимум 2 кнопки: стартовый выбор и второй выбор ветки.
-        choice_limit = 2 if bool(evt.get('is_quest', False) or evt.get('_full_quest', False)) else 3
+        # Квесты теперь могут иметь 2-4 разных персона-реакции + опционально
+        # ещё один "escape" (уйти/отказаться) — итого до 5 кнопок. Escape
+        # добавляется/фильтруется отдельно в ai_maybe_add_escape_choice(),
+        # здесь просто расширяем верхний предел.
+        choice_limit = 5 if bool(evt.get('is_quest', False) or evt.get('_full_quest', False)) else 3
         safe_choices = []
         try:
             for ch in list(choices)[:choice_limit]:
@@ -265,6 +290,63 @@ init python:
                     ct = ai_to_text(ch.get('text', u'Continue'), u'Continue')
                     if not ct or ct.strip() in [u"", u"...", u"None"]:
                         ct = u"Continue"
+                    # Пост-фикс "первого лица". Правило "choice.text — это то,
+                    # что делает Саманта, во втором лице, начиная с You" часто
+                    # игнорируется слабой моделью, и на кнопке всплывает
+                    # "He does not notice you." или "Try to stay quiet like a
+                    # mouse." Меняем текст на явное "You ...":
+                    #  - если начинается с He/She/They/Someone/It/The … —
+                    #    заменяем на "You react: <оригинал>";
+                    #  - если это командная форма без подлежащего
+                    #    ("Try ...", "Stay ...", "Kneel.") — префиксуем "You ";
+                    #  - оставляем как есть, если уже начинается с You/Your/I.
+                    try:
+                        ct_stripped = ct.strip()
+                        # (label) префикс сохраняем, работаем только с телом
+                        prefix = u""
+                        body = ct_stripped
+                        if body.startswith(u"(") and u")" in body:
+                            _p_end = body.index(u")") + 1
+                            prefix = body[:_p_end] + u" "
+                            body = body[_p_end:].lstrip()
+                        low = body.lower()
+                        _first = low.split(None, 1)[0] if low.split() else u""
+                        _third_person = {
+                            u"he", u"she", u"they", u"someone", u"somebody",
+                            u"it", u"the", u"a", u"an", u"his", u"her",
+                            u"their", u"nobody", u"no", u"there",
+                        }
+                        _ok_first = {u"you", u"your", u"i", u"my", u"me", u"we"}
+                        if _first in _third_person:
+                            body = u"You react: " + body
+                        elif _first and _first not in _ok_first:
+                            # командная форма → "You <verb...>"
+                            # только для явно императивных слов, чтобы не
+                            # калечить редкие валидные варианты
+                            _imperative_starts = {
+                                u"try", u"stay", u"kneel", u"freeze", u"grab",
+                                u"push", u"pull", u"drop", u"lean", u"look",
+                                u"walk", u"run", u"hide", u"cry", u"laugh",
+                                u"smile", u"whisper", u"shout", u"scream",
+                                u"give", u"take", u"say", u"tell", u"ask",
+                                u"answer", u"bite", u"kiss", u"grind", u"press",
+                                u"open", u"close", u"reach", u"turn", u"bend",
+                                u"kneel", u"stand", u"sit", u"lie", u"lay",
+                                u"agree", u"accept", u"refuse", u"decline",
+                                u"resist", u"submit", u"obey", u"comply",
+                                u"play", u"pretend", u"act", u"fake",
+                                u"ignore", u"acknowledge", u"admit", u"deny",
+                                u"beg", u"plead", u"nod", u"shake",
+                                u"bolt", u"flee", u"escape", u"slip",
+                                u"weaponize", u"collapse", u"crumble", u"dissociate",
+                                u"go", u"start", u"stop", u"keep", u"let",
+                                u"clamp", u"cover", u"hold", u"squeeze", u"tighten",
+                            }
+                            if _first in _imperative_starts:
+                                body = u"You " + body[0].lower() + body[1:]
+                        ct = prefix + body
+                    except Exception:
+                        pass
                     # Полная копия, чтобы next_step/effects/ending/perk не терялись
                     eff = ch.get('effects', {})
                     if not ai_dict_like(eff):
@@ -315,9 +397,15 @@ init python:
         store.ai_event_qdesc = ai_to_text(evt.get('quest_desc', u''), u'')
 
         try:
+            # FIX: если это локальный fallback (LLM не смог собрать дерево) —
+            # ОБЯЗАТЕЛЬНО оставляем последний RAW от Ollama, иначе диагностика
+            # ошибки «normalize failed …» вырождается в пустой [RAW] и починить
+            # промпт становится невозможно. В нормальном сценарии RAW пустой, как и было.
+            _keep_raw = bool(ai_dict_like(evt) and (evt.get('_local_fallback') or evt.get('_llm_failed_reason')))
+            _raw_for_debug = getattr(store, 'ai_debug_last_json_raw', u"") if _keep_raw else u""
             ai_set_event_debug(
                 reason,
-                raw=u"",  # не тащим старый RAW от прошлой ошибки Ollama в финальный UI-debug
+                raw=_raw_for_debug,
                 parsed={
                     "title": store.ai_event_title,
                     "description": store.ai_event_desc,
@@ -543,7 +631,9 @@ init python:
                     "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)) or 0,
                     "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
                     "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
-                    "is_ending": bool(ch.get('is_ending', False) or (ns_val is None)),
+                    # ТОЛЬКО explicit is_ending. Null next_step = "движок
+                    # сгенерит продолжение" (on-demand chain), а НЕ финал.
+                    "is_ending": bool(ch.get('is_ending', False)),
                     "is_ending_ack": bool(ch.get('is_ending_ack', False)),
                 })
             else:
@@ -687,7 +777,499 @@ Guidelines:
 
         # Убираем висячие запятые перед } или ].
         s = re.sub(r',\s*([\}\]])', r'\1', s)
+
+        # ДОКРУЧИВАЕМ НЕЗАКРЫТЫЕ СКОБКИ. Слабые GGUF (в т.ч. Dirty-Muse
+        # IQ2_XS) любят обрываться на середине последнего choice: пишут
+        # ...ending_text":"..." и всё, без "]}" в конце. Считаем баланс
+        # скобок ВНЕ СТРОК и дописываем то, чего не хватает, в правильном
+        # порядке (стек).
+        try:
+            stack = []
+            in_str = False
+            escape = False
+            for ch in s:
+                if in_str:
+                    if escape:
+                        escape = False
+                    elif ch == '\\':
+                        escape = True
+                    elif ch == '"':
+                        in_str = False
+                    continue
+                if ch == '"':
+                    in_str = True
+                elif ch == '{':
+                    stack.append('}')
+                elif ch == '[':
+                    stack.append(']')
+                elif ch == '}' or ch == ']':
+                    if stack and stack[-1] == ch:
+                        stack.pop()
+                    # если mismatch — не трогаем, пусть json.loads ругнётся
+            # Если строка не закрылась — закрываем.
+            if in_str:
+                s = s + '"'
+            # Также срежем trailing запятую перед докручиванием.
+            s = re.sub(r',\s*$', '', s)
+            if stack:
+                s = s + ''.join(reversed(stack))
+        except Exception:
+            pass
+
         return s
+
+    # ------------------------------------------------------------------
+    # ЛОГИРОВАНИЕ ЗАПРОСОВ В LLM
+    # ------------------------------------------------------------------
+    # Пишем 2 файла рядом с игрой:
+    #   ai_last_prompt.txt   — только ПОСЛЕДНИЙ запрос, перезаписывается
+    #                           каждым новым вызовом. Удобно быстро открыть
+    #                           и посмотреть, что реально ушло в модель.
+    #   ai_prompt_log.txt    — append всех запросов подряд с таймстампом,
+    #                           меткой задачи и параметрами вызова.
+    # Ответ модели туда НЕ пишется, для ответов уже есть ai_event_debug.txt
+    # и ai_debug_last_json_raw. Если очень надо — включи AI_LOG_INCLUDE_RESPONSE.
+    AI_PROMPT_LOG_MAX_BYTES = 512 * 1024   # ~0.5 МБ, чтобы файл не разросся до гигабайта
+    AI_LOG_INCLUDE_RESPONSE = False
+
+    def ai_log_prompt(task_desc, model, sys_prompt, user_prompt, extra=None):
+        try:
+            import datetime
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            desc = ai_to_text(task_desc if task_desc else u"(no task_desc)", u"(no task_desc)")
+            head = (
+                u"===== AI REQUEST =====\n"
+                u"time    : %s\n"
+                u"task    : %s\n"
+                u"model   : %s\n"
+            ) % (stamp, desc, ai_to_text(model, u""))
+            if extra:
+                try:
+                    head += u"params  : %s\n" % ai_to_text(extra, u"")
+                except Exception:
+                    pass
+            body = (
+                u"----- SYSTEM PROMPT -----\n%s\n"
+                u"----- USER PROMPT -----\n%s\n"
+                u"===== END REQUEST =====\n\n"
+            ) % (ai_to_text(sys_prompt, u""), ai_to_text(user_prompt, u""))
+
+            # 1) Всегда перезаписываем «последний запрос».
+            try:
+                ai_write_debug_file("ai_last_prompt.txt", head + body)
+            except Exception as e:
+                print("ai_log_prompt last err: %s" % e)
+
+            # 2) Ротация append-лога, чтобы не рос бесконечно.
+            path = "ai_prompt_log.txt"
+            try:
+                if os.path.exists(path) and os.path.getsize(path) > AI_PROMPT_LOG_MAX_BYTES:
+                    try:
+                        os.rename(path, path + ".old")
+                    except Exception:
+                        try:
+                            os.remove(path)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                fh = codecs.open(path, "a", "utf-8")
+                fh.write(head + body)
+                fh.close()
+            except Exception as e:
+                print("ai_log_prompt append err: %s" % e)
+        except Exception as e:
+            print("ai_log_prompt fatal: %s" % e)
+
+    def ai_log_response(task_desc, content):
+        """Опционально: если AI_LOG_INCLUDE_RESPONSE=True, дозаписывает ответ в append-лог."""
+        if not AI_LOG_INCLUDE_RESPONSE:
+            return
+        try:
+            desc = ai_to_text(task_desc if task_desc else u"(no task_desc)", u"(no task_desc)")
+            text = (
+                u"----- RESPONSE (%s) -----\n%s\n----- END RESPONSE -----\n\n"
+            ) % (desc, ai_to_text(content, u""))
+            fh = codecs.open("ai_prompt_log.txt", "a", "utf-8")
+            fh.write(text)
+            fh.close()
+        except Exception as e:
+            print("ai_log_response err: %s" % e)
+
+    # ------------------------------------------------------------------
+    # МЯГКИЙ ТЕКСТОВЫЙ ФОРМАТ ДЛЯ КВЕСТОВ (без JSON)
+    # ------------------------------------------------------------------
+    # Слабым 2-битным GGUF (в т.ч. Dirty-Muse i1-IQ2_XS) очень трудно
+    # писать валидный JSON: слетают кавычки, скобки, запятые. Поэтому
+    # для генерации квестов даём модели упрощённый key-value формат:
+    #
+    #   TITLE: короткое название квеста
+    #   DESC: 1-2 предложения общего сеттинга
+    #   STEP: step1
+    #   STEP_TITLE: название этапа
+    #   STEP_DESC: что происходит на этом этапе
+    #   CHOICE: текст первого выбора
+    #   EFFECTS: femininity=+1, confidence=-1
+    #   ENDING_TITLE: короткий заголовок исхода
+    #   ENDING_TEXT: 1-2 предложения об исходе
+    #   CHOICE: текст второго выбора
+    #   EFFECTS: confidence=+1
+    #   ENDING_TITLE: ...
+    #   ENDING_TEXT: ...
+    #
+    # Никаких кавычек, скобок, запятых как разделителей структуры.
+    # Многострочные значения разрешены: любые строки без ключа "KEY:"
+    # приклеиваются к последнему значению.
+    #
+    # ai_parse_kv_quest(text) возвращает dict совместимой формы:
+    #   {"title","description","steps":[{"id","title","description",
+    #     "choices":[{"text","effects","next_step","ending_title",
+    #                 "ending_text","is_ending"}...]}...]}
+    # Такой dict напрямую скармливается ai_normalize_quest_tree().
+
+    # Ключи, которые распознаём в мягком KV-формате. Порядок важен для regex —
+    # более длинные варианты идут раньше коротких (STEP_TITLE до STEP и т.д.),
+    # иначе "STEP_TITLE:" распарсится как ключ "STEP" со значением "_TITLE:...".
+    _AI_KV_KEYS = (
+        "TITLE",
+        "DESCRIPTION", "DESC",
+        "STEP_ID", "STEP_TITLE", "STEP_DESCRIPTION", "STEP_DESC", "STEP",
+        "CHOICE_TEXT", "CHOICE",
+        # Sub-field алиасы, которые модель любит писать на следующей строке
+        # после голого "CHOICE:" (без значения). Обработчик применяет их
+        # к ТЕКУЩЕМУ контексту: если есть cur_choice — к нему, иначе к step.
+        "TEXT", "RESPONSE", "ACTION",
+        "EFFECTS", "EFFECT",
+        "ENDING_TITLE", "ENDING_TEXT", "ENDING",
+        "OUTCOME", "RESULT", "HEADLINE",
+        "NEXT_STEP", "NEXT",
+        "IS_ENDING", "ENDS_HERE", "FINAL",  # флаг терминальности ветки
+        "OUTFIT_ITEMS", "OUTFIT_REASON", "OUTFIT",
+        "TAGS",
+    )
+    # Разрешаем перед ключом markdown-мусор:
+    #   *   — bullet-list
+    #   -   — тоже bullet
+    #   >   — quote
+    #   #   — heading
+    #   **  — bold-обёртка
+    # И разрешаем ЧИСЛОВОЙ суффикс у STEP/CHOICE (STEP1, STEP2, CHOICE1, CHOICE_2),
+    # который слабые модели любят добавлять сами.
+    _AI_KV_KEY_RE = re.compile(
+        r'^\s*'                                 # leading whitespace
+        r'(?:[\*\-\+>#]+\s*)*'                  # optional markdown bullets / headings
+        r'\**\s*'                               # optional **bold** open
+        r'(?:\**)?'                             # extra ** just in case
+        r'(' + u"|".join(_AI_KV_KEYS) + r')'    # the KEY
+        r'\s*[_\- ]?\d*'                        # optional numeric suffix like STEP1 / CHOICE 2
+        r'\**'                                  # optional **bold** close
+        r'\s*[:\-—–]\s*'                        # separator (:, -, em-dash, en-dash)
+        r'(.*)$',                               # value
+        re.IGNORECASE
+    )
+
+    def _ai_parse_effects(raw):
+        """Парсит строку EFFECTS в dict.
+
+        Понимает три формата, потому что модели переключаются между ними:
+          1) плоский KV:  'femininity=+1, confidence=-1; money+5'
+          2) JSON-подобный dict:  "{strip: 'top', 'allure': 2, drunk: 1}"
+          3) смесь ключ=строка + ключ=число:  'strip=top, drunk=1'
+
+        Возвращаемые значения: int для числовых статов, str для строковых
+        ключей вроде strip / travel_to / diary / remove_perk.
+        """
+        out = {}
+        if raw is None:
+            return out
+        # Если сразу передали dict (например, KV-парсер уже распарсил JSON).
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                try:
+                    kk = ai_to_text(k, u"").strip().lower().replace(u" ", u"_")
+                except Exception:
+                    continue
+                if not kk:
+                    continue
+                # число сохраним как int, всё остальное — как есть.
+                try:
+                    out[kk] = int(v)
+                except Exception:
+                    out[kk] = v
+            return out
+        try:
+            s = ai_to_text(raw, u"").strip()
+        except Exception:
+            return out
+        if not s:
+            return out
+        # Быстрый путь: если строка похожа на JSON — попробуем распарсить.
+        stripped = s.strip()
+        if stripped.startswith("{"):
+            for cand in (stripped, ai_repair_json_text(stripped)):
+                try:
+                    obj = json.loads(cand)
+                    if isinstance(obj, dict):
+                        return _ai_parse_effects(obj)  # рекурсия по dict-ветке
+                except Exception:
+                    pass
+        # чистим возможные скобки/кавычки, которые модель всё же поставила
+        s = s.strip().strip("{}[]()")
+        # разделители: запятая / точка с запятой / | / перевод строки
+        parts = re.split(r'[,;|\n]+', s)
+        for p in parts:
+            p = p.strip().strip("\"'` ")
+            if not p:
+                continue
+            # 1) числовой: femininity=+1 / confidence: -1 / money +5
+            m = re.match(r'^["\']?([A-Za-z_][A-Za-z0-9_ ]*)["\']?\s*[:=]?\s*([+\-]?\d+)\s*$', p)
+            if m:
+                k = m.group(1).strip().lower().replace(" ", "_")
+                try:
+                    out[k] = int(m.group(2))
+                    continue
+                except Exception:
+                    pass
+            # 2) строковый: strip='top' / travel_to: loc_bar / remove_perk = perk_shy
+            m2 = re.match(r'^["\']?([A-Za-z_][A-Za-z0-9_ ]*)["\']?\s*[:=]\s*["\']?([^"\']+?)["\']?\s*$', p)
+            if m2:
+                k = m2.group(1).strip().lower().replace(" ", "_")
+                v = m2.group(2).strip()
+                if k and v:
+                    out[k] = v
+                    continue
+        return out
+
+    def ai_parse_kv_quest(text):
+        """Парсит мягкий key-value квест-формат в dict, совместимый с ai_normalize_quest_tree.
+           Возвращает dict или None, если совсем ничего не удалось распознать."""
+        if text is None:
+            return None
+        try:
+            s = ai_to_text(text, u"")
+        except Exception:
+            return None
+        # Срезаем возможные ```...``` обёртки
+        s = re.sub(r'```[a-zA-Z]*', '', s)
+        s = s.replace('```', '')
+        # Иногда модель всё-таки присылает JSON — попробуем сначала его.
+        stripped = s.strip()
+        if stripped.startswith('{') or stripped.startswith('['):
+            try:
+                cand = json.loads(stripped)
+                if ai_dict_like(cand):
+                    return cand
+            except Exception:
+                try:
+                    cand = json.loads(ai_repair_json_text(stripped))
+                    if ai_dict_like(cand):
+                        return cand
+                except Exception:
+                    pass
+
+        lines = s.splitlines()
+        quest = {"title": u"", "description": u"", "steps": []}
+        cur_step = None
+        cur_choice = None
+        last_ref = None      # (container_dict, field_name) — куда приклеивать многострочные хвосты
+        found_any_key = False
+
+        def _new_step(sid_hint=None):
+            sid = ai_to_text(sid_hint, u"").strip() if sid_hint else u""
+            if not sid:
+                sid = u"step%d" % (len(quest["steps"]) + 1)
+            step = {"id": sid, "title": u"", "description": u"", "choices": []}
+            quest["steps"].append(step)
+            return step
+
+        def _new_choice(step, ct):
+            ch = {
+                "text": ai_to_text(ct, u"Continue").strip() or u"Continue",
+                "effects": {},
+                "next_step": None,
+                "ending_title": None,
+                "ending_text": None,
+                # is_ending=False по умолчанию — chain-режим сам решит через
+                # IS_ENDING от модели или через MAX_STEPS cap.
+                "is_ending": False,
+            }
+            step["choices"].append(ch)
+            return ch
+
+        for raw_line in lines:
+            line = raw_line.rstrip()
+            if not line.strip():
+                # пустая строка — просто разделитель, не сбрасываем контекст
+                continue
+            m = _AI_KV_KEY_RE.match(line)
+            if not m:
+                # многострочный хвост предыдущего поля.
+                # Срезаем возможный ведущий markdown-мусор ("- ", "* ", "> ")
+                # и обрамляющие ** — модели любят их для акцента.
+                cont_txt = re.sub(r'^\s*[\*\-\+>#]+\s*', u'', line).strip()
+                cont_txt = re.sub(r'^\*+|\*+$', u'', cont_txt).strip()
+                if last_ref is not None and cont_txt:
+                    cont, field = last_ref
+                    prev = cont.get(field) or u""
+                    sep = u" " if prev else u""
+                    cont[field] = ai_to_text(prev, u"") + sep + cont_txt
+                continue
+
+            found_any_key = True
+            key = m.group(1).upper()
+            val = (m.group(2) or u"").strip()
+            # Срезаем закрывающие ** (**bold** обёртка со стороны значения)
+            # и обрамляющие кавычки/бэктики.
+            val = re.sub(r'^\*+|\*+$', u'', val).strip()
+            val = val.strip("\"'` ")
+
+            if key == "TITLE":
+                quest["title"] = val
+                last_ref = (quest, "title")
+            elif key in ("DESC", "DESCRIPTION"):
+                quest["description"] = val
+                last_ref = (quest, "description")
+            elif key in ("STEP", "STEP_ID"):
+                cur_step = _new_step(val)
+                cur_choice = None
+                last_ref = None
+            elif key == "STEP_TITLE":
+                if cur_step is None:
+                    cur_step = _new_step()
+                cur_step["title"] = val
+                last_ref = (cur_step, "title")
+            elif key in ("STEP_DESC", "STEP_DESCRIPTION"):
+                if cur_step is None:
+                    cur_step = _new_step()
+                cur_step["description"] = val
+                last_ref = (cur_step, "description")
+            elif key in ("CHOICE", "CHOICE_TEXT"):
+                if cur_step is None:
+                    cur_step = _new_step()
+                # Если val пустое ('CHOICE:' на голой строке), НЕ ставим
+                # default 'Continue' — модель наверняка дала текст на
+                # следующей строке через 'text:' / просто продолжением.
+                # Оставим text пустым, парсер заполнит через TEXT/RESPONSE
+                # или через многострочный хвост, а если так и осталось
+                # пустым — уже в самом конце fillnem 'Continue'.
+                _init_text = val if val else u""
+                cur_choice = _new_choice(cur_step, _init_text or u"")
+                # если val пустое — не ставим 'Continue', иначе следующие
+                # многострочные хвосты приклеятся к 'Continue text ...'.
+                if not val:
+                    cur_choice["text"] = u""
+                last_ref = (cur_choice, "text")
+            elif key in ("TEXT", "RESPONSE", "ACTION"):
+                # Sub-field: применяем к текущему choice, если он есть.
+                # Если choice ещё нет — трактуем как описание шага.
+                if cur_choice is not None:
+                    cur_choice["text"] = val
+                    last_ref = (cur_choice, "text")
+                elif cur_step is not None:
+                    if not cur_step.get("description"):
+                        cur_step["description"] = val
+                    else:
+                        cur_step["description"] = cur_step["description"] + u" " + val
+                    last_ref = (cur_step, "description")
+            elif key in ("OUTCOME", "RESULT", "HEADLINE"):
+                # Алиасы для ENDING_TITLE / ENDING_TEXT. HEADLINE и
+                # OUTCOME чаще всего = title исхода; RESULT — текст.
+                if cur_choice is None:
+                    if cur_step is None:
+                        cur_step = _new_step()
+                    cur_choice = _new_choice(cur_step, u"")
+                    cur_choice["text"] = u""
+                target_field = "ending_title" if key in ("OUTCOME", "HEADLINE") else "ending_text"
+                cur_choice[target_field] = val
+                # НЕ ставим is_ending=True автоматически: наличие ending_title
+                # ещё не значит финал ветки. Финал определяется явным
+                # IS_ENDING:true от модели (или потолком MAX_STEPS в движке).
+                last_ref = (cur_choice, target_field)
+            elif key in ("EFFECTS", "EFFECT"):
+                if cur_choice is None:
+                    if cur_step is None:
+                        cur_step = _new_step()
+                    cur_choice = _new_choice(cur_step, u"Continue")
+                cur_choice["effects"] = _ai_parse_effects(val)
+                last_ref = None
+            elif key == "ENDING_TITLE":
+                if cur_choice is None:
+                    if cur_step is None:
+                        cur_step = _new_step()
+                    cur_choice = _new_choice(cur_step, u"Continue")
+                cur_choice["ending_title"] = val
+                last_ref = (cur_choice, "ending_title")
+            elif key in ("ENDING", "ENDING_TEXT"):
+                if cur_choice is None:
+                    if cur_step is None:
+                        cur_step = _new_step()
+                    cur_choice = _new_choice(cur_step, u"Continue")
+                cur_choice["ending_text"] = val
+                last_ref = (cur_choice, "ending_text")
+            elif key in ("NEXT_STEP", "NEXT"):
+                if cur_choice is not None:
+                    v = val.strip()
+                    if v.lower() in (u"", u"null", u"none", u"end", u"finish", u"done", u"-"):
+                        cur_choice["next_step"] = None
+                        # НЕ ставим is_ending=True автоматически: null next_step
+                        # теперь ЗНАЧИТ "движок сам сгенерирует продолжение"
+                        # (on-demand chain). is_ending нужен только если LLM
+                        # его ЯВНО указала через IS_ENDING.
+                    else:
+                        cur_choice["next_step"] = v
+                        cur_choice["is_ending"] = False
+                last_ref = None
+            elif key in ("IS_ENDING", "ENDS_HERE", "FINAL"):
+                # Явный маркер финальности. Модель ставит true → эта ветка
+                # закрывает сцену, игра покажет summary вместо генерации
+                # следующего шага.
+                if cur_choice is not None:
+                    v = val.strip().lower()
+                    cur_choice["is_ending"] = v in (u"true", u"1", u"yes", u"y", u"end")
+                last_ref = None
+            elif key in ("OUTFIT", "OUTFIT_ITEMS"):
+                if cur_step is not None:
+                    items = [x.strip() for x in re.split(r'[,;|]+', val) if x.strip()]
+                    outfit = cur_step.get("outfit_suggestion") or {"items": [], "reason": u""}
+                    outfit["items"] = items
+                    cur_step["outfit_suggestion"] = outfit
+                last_ref = None
+            elif key == "OUTFIT_REASON":
+                if cur_step is not None:
+                    outfit = cur_step.get("outfit_suggestion") or {"items": [], "reason": u""}
+                    outfit["reason"] = val
+                    cur_step["outfit_suggestion"] = outfit
+                    last_ref = (outfit, "reason")
+            elif key == "TAGS":
+                tags = [x.strip() for x in re.split(r'[,;|]+', val) if x.strip()]
+                if cur_step is not None:
+                    cur_step["tags"] = tags
+                else:
+                    quest["tags"] = tags
+                last_ref = None
+
+        if not found_any_key:
+            return None
+        # Мини-санитация: если совсем нет шагов, но есть CHOICE-ы верхнего уровня — обёртка.
+        if not quest["steps"]:
+            return None
+        # Мини-санитация:
+        #  1) у каждого шага должен быть хоть один choice;
+        #  2) если у choice остался пустой text (CHOICE: без значения и без
+        #     TEXT:), — только тогда ставим 'Continue' как последнюю опору.
+        for st in quest["steps"]:
+            if not st.get("choices"):
+                # Единственный дефолтный choice — он реально финальный,
+                # потому что альтернатив нет и продолжать некуда.
+                st["choices"] = [{
+                    "text": u"Continue", "effects": {}, "next_step": None,
+                    "ending_title": None, "ending_text": None, "is_ending": True,
+                }]
+            for ch in st["choices"]:
+                if not ch.get("text") or not ai_to_text(ch.get("text"), u"").strip():
+                    ch["text"] = u"Continue"
+        return quest
 
     # Base call с настраиваемым таймаутом 25 секунд для разгрузки Олламы
     def ai_call(model, sys_prompt, user_prompt, want_json=False, temp=0.85, max_tokens=700, task_desc=None, timeout=120, force_json_format=True):
@@ -721,6 +1303,18 @@ Guidelines:
         # Для деревьев квестов можно выключить force_json_format и парсить вручную.
         if want_json and force_json_format:
             payload["format"]="json"
+
+        # Логируем запрос ДО того, как что-то отправим. Так даже если Ollama
+        # уронит соединение / зависнет, в ai_last_prompt.txt останется точный
+        # промпт, ушедший в модель.
+        try:
+            ai_log_prompt(
+                task_desc, model, sys_prompt, user_prompt,
+                extra=u"want_json=%s force_json=%s temp=%s max_tokens=%s timeout=%s ctx=%s"
+                      % (want_json, force_json_format, temp, max_tokens, timeout, OLLAMA_NUM_CTX),
+            )
+        except Exception as _e:
+            print("ai_log_prompt outer err: %s" % _e)
         lock_acquired = False
         raw_content = None
         try:
@@ -835,6 +1429,18 @@ Guidelines:
             "num_gpu": 0,
         }
         payload = {"model": model, "messages": messages, "stream": False, "options": safe_options}
+
+        # Логируем и CPU-safe запрос отдельно — по метке task_desc в логе видно,
+        # что это retry, а не первичный вызов.
+        try:
+            ai_log_prompt(
+                (u"CPU-SAFE: " + ai_to_text(task_desc, u"")) if task_desc else u"CPU-SAFE",
+                model, sys_prompt, user_prompt,
+                extra=u"cpu_safe temp=%s max_tokens=%s timeout=%s" % (temp, max_tokens, timeout),
+            )
+        except Exception as _e:
+            print("ai_log_prompt cpu_safe err: %s" % _e)
+
         lock_acquired = False
         raw_content = None
         try:
@@ -906,10 +1512,13 @@ Guidelines:
             s['hygiene']=int(getattr(p,'hygiene',100))
             s['hunger']=int(getattr(p,'hunger',100))
             s['money']=getattr(p,'cash',0)
-            s['fem']=getattr(renpy.store,'ai_fem',25)
-            s['horny']=getattr(renpy.store,'ai_horny',5)
-            s['trust']=getattr(renpy.store,'ai_trust',40)
+            # ВАЖНО: 'femininity' как отдельный стат выпилен. В игре уже есть
+            # 'self-acceptance as a girl' (ai_accept), и это буквально то же
+            # самое, что бывший ai_fem. Оставляем один стат = accept, а
+            # ключ gs['fem'] сохраняем как алиас для обратной совместимости
+            # с промптами/UI, которые ждут именно 'fem'.
             s['accept']=getattr(renpy.store,'ai_accept',20)
+            s['fem']=s['accept']
 
             try:
                 t_obj=getattr(renpy.store,'t',None)
@@ -992,23 +1601,55 @@ Guidelines:
                     s['outfit_bottom']=c_obj.description_bottom()[:80] if hasattr(c_obj,'description_bottom') else ""
                     s['is_slutty']=getattr(c_obj,'slutty',False)
                     s['is_exposed']=getattr(c_obj,'exposed',False)
+
+                    # НОВОЕ: детальный слот-по-слоту список надетых вещей.
+                    # У Клэсса Clothing слоты хранятся как числовые id (0 = ничего),
+                    # реальный предмет достаётся из globals()['item_<slot>_<id>'].
+                    # Собираем в вид "top: Pink Crop Top; bottom: Mini Skirt; ...".
+                    worn = []
+                    slot_names = [
+                        ("outfit", "outfit"),
+                        ("dress", "dress"),
+                        ("top", "top"),
+                        ("bottom", "bottom"),
+                        ("bra", "bra"),
+                        ("pants", "panties"),
+                        ("shoes", "shoes"),
+                        ("socks", "socks"),
+                        ("jacket", "jacket"),
+                        ("stockings", "stockings"),
+                        ("gloves", "gloves"),
+                        ("hat", "hat"),
+                        ("glasses", "glasses"),
+                        ("necklace", "necklace"),
+                        ("earrings", "earrings"),
+                    ]
+                    for attr, label in slot_names:
+                        try:
+                            slot_id = getattr(c_obj, attr, 0)
+                            if not slot_id:
+                                continue
+                            item = getattr(renpy.store, "item_%s_%s" % (attr, slot_id), None)
+                            if item is None:
+                                continue
+                            iname = getattr(item, "name", None) or getattr(item, "desc", None) or ("item_%s_%s" % (attr, slot_id))
+                            worn.append(u"%s: %s" % (label, iname))
+                        except Exception:
+                            continue
+                    s['outfit_items'] = "; ".join(worn) if worn else "nothing worn"
                 else:
                     s['outfit']=u"unknown"; s['outfit_top']=u""; s['outfit_bottom']=u""; s['is_slutty']=False; s['is_exposed']=False
-            except:
+                    s['outfit_items']=u"unknown"
+            except Exception as _outf_e:
                 s['outfit']=u"unknown"; s['outfit_top']=u""; s['outfit_bottom']=u""; s['is_slutty']=False; s['is_exposed']=False
+                s['outfit_items']=u"unknown"
 
-            try:
-                inv=getattr(renpy.store,'inv',None)
-                if inv and hasattr(inv,'items'):
-                    items=[getattr(it,'name','?') for it in inv.items[:10]]
-                    s['inventory']=", ".join(items) if items else "empty"
-                    s['inventory_count']=len(inv.items)
-                else:
-                    ilist=getattr(renpy.store,'item_list',[])
-                    s['inventory']=", ".join([getattr(it,'name','?') for it in ilist[:10]]) if ilist else "empty"
-                    s['inventory_count']=len(ilist)
-            except:
-                s['inventory']="unknown"; s['inventory_count']=0
+            # ВАЖНО: инвентарь в LLM НЕ передаём — в игровом инвентаре куча
+            # gamedev-предметов (item_top_22 и т.п.), которых по РП у Саманты
+            # физически нет. Передаём только деньги, это единственное, что
+            # реально влияет на возможные события.
+            s['inventory'] = u"(not exposed to LLM)"
+            s['inventory_count'] = 0
 
             try:
                 qlog=getattr(renpy.store,'log',None)
@@ -1026,11 +1667,26 @@ Guidelines:
                 s['active_quests']="none"; s['quest_count']=0
 
             try:
-                perks=[perk.name for perk in getattr(p,'perk_list',[])][-8:]
-                s['perks']=", ".join(perks) if perks else "Former man"
-                s['perks_list']=perks
+                _plist = list(getattr(p, 'perk_list', []) or [])[-8:]
+                perk_names = [getattr(x, 'name', str(x)) for x in _plist]
+                # Детальный список (имя + краткое описание) — модели нужен
+                # контекст перка, чтобы придумать под него уникальный вариант.
+                perk_detailed = []
+                for x in _plist:
+                    try:
+                        nm = ai_to_text(getattr(x, 'name', u'?'), u'?')
+                        ds = ai_to_text(getattr(x, 'desc', u''), u'')
+                        if ds:
+                            perk_detailed.append(u"%s: %s" % (nm, ds[:100]))
+                        else:
+                            perk_detailed.append(nm)
+                    except Exception:
+                        pass
+                s['perks'] = ", ".join(perk_names) if perk_names else "Former man"
+                s['perks_list'] = perk_names
+                s['perks_detailed'] = perk_detailed  # для choices-generator'а
             except:
-                s['perks']="Former man"; s['perks_list']=[]
+                s['perks']="Former man"; s['perks_list']=[]; s['perks_detailed']=[]
 
             try:
                 s['vsex']=getattr(p,'vsex',0)
@@ -1043,6 +1699,55 @@ Guidelines:
             except:
                 s['vsex']=0; s['asex']=0; s['hsex']=0; s['osex']=0; s['sex_total']=0; s['is_virgin']=True; s['is_anal_virgin']=True
 
+            # НОВОЕ: расширенные характеристики персонажа.
+            # Раньше промпт квеста получал только fem+confidence, а игра
+            # знает про Саманту сильно больше. Модель без этих полей
+            # не может строить осмысленные события.
+            try:
+                s['int']       = int(getattr(p, 'int',      getattr(p, '_int',     0)) or 0)
+                s['allure']    = int(getattr(p, 'allure',   getattr(p, '_allure',  0)) or 0)
+                s['body_conf'] = int(getattr(p, 'body_conf', 0) or 0)
+                s['drunk']     = int(getattr(p, 'drunk',    getattr(p, '_drunk',   0)) or 0)
+                s['high']      = int(getattr(p, 'high',     getattr(p, '_high',    0)) or 0)
+            except Exception:
+                s['int']=0; s['allure']=0; s['body_conf']=0; s['drunk']=0; s['high']=0
+
+            # Тело: грудь, волосы, лактация — важные NSFW/косметические маркеры.
+            try:
+                s['breasts_size']  = int(getattr(p, 'breasts', 2) or 2)
+                s['hair_length']   = int(getattr(p, '_hair_length', getattr(p, 'hair_length', 0)) or 0)
+                s['hair_colour']   = int(getattr(p, 'hair_colour', 0) or 0)
+                s['pubic_hair']    = int(getattr(p, '_phair',     getattr(p, 'phair',       0)) or 0)
+                s['is_lactating']  = bool(getattr(p, 'lactating', False))
+                s['is_pregnant']   = bool(getattr(p, 'pregnant', 0))
+                s['pregnancy_stage'] = int(getattr(p, '_pregnancy', 1) or 1)
+                s['days_pregnant'] = int(getattr(p, 'days_pregnant', 0) or 0)
+            except Exception:
+                s['breasts_size']=2; s['hair_length']=0; s['hair_colour']=0; s['pubic_hair']=0
+                s['is_lactating']=False; s['is_pregnant']=False; s['pregnancy_stage']=1; s['days_pregnant']=0
+
+            # Менструальный цикл — сильный сюжетный маркер.
+            try:
+                cyc = getattr(p, 'cycle_conditions', None) or {}
+                s['cycle_stage'] = cyc.get('stage', 'no_cycle') if isinstance(cyc, dict) else 'no_cycle'
+                s['cycle_day']   = int(cyc.get('count_cycle', 0)) if isinstance(cyc, dict) else 0
+            except Exception:
+                s['cycle_stage']='no_cycle'; s['cycle_day']=0
+
+            # Недавние локации — где Саманта была в последние ходы.
+            try:
+                recent_locs = list(getattr(renpy.store, 'ai_recent_locations', []) or [])
+                s['recent_locations'] = ", ".join([ai_to_text(x, u"") for x in recent_locs[-6:]]) if recent_locs else u"none"
+            except Exception:
+                s['recent_locations'] = u"none"
+
+            # Недавние действия (уже есть глобально, продублируем в gs для удобства).
+            try:
+                recent_acts = list(getattr(renpy.store, 'ai_recent_actions', []) or [])
+                s['recent_actions'] = " / ".join([ai_to_text(x, u"") for x in recent_acts[-6:]]) if recent_acts else u"none"
+            except Exception:
+                s['recent_actions'] = u"none"
+
             try:
                 s['nearby_npcs']="none at home" if s['location_private'] else "maybe people around"
             except:
@@ -1053,10 +1758,121 @@ Guidelines:
             except:
                 s['weather']=0
 
-            s['doctor_name']="Dr. Tess Brooker"
-            s['doctor_role']="Institute Psychologist, female, 32yo, monitors via phone/biometrics, NOT via cameras, dominant"
-            s['institute_has_cameras_in_home']=False
-            s['institute_monitoring']="phone, bracelet biometrics, not video in private home"
+            # ВНИМАНИЕ: раньше сюда жёстко зашивался "Dr. Tess Brooker" как
+            # хендлер Института. Это выдумка — в реальном сюжете игры этого
+            # персонажа нет, и LLM начинала строить квесты вокруг него,
+            # обещать встречу с ним и т.д., хотя код никогда не сведёт
+            # игрока с несуществующим NPC. Теперь этой выдумки нет: всё,
+            # что модель узнаёт о людях, берётся из met_npcs (реально
+            # встреченные) и diary_entries (реально записанные события).
+            s['doctor_name'] = u""
+            s['doctor_role'] = u""
+            s['institute_has_cameras_in_home'] = False
+            s['institute_monitoring'] = u"phone/bracelet biometrics"
+
+            # НОВОЕ: список NPC, которых Саманта РЕАЛЬНО знает.
+            # ВАЖНО про источники: в TheFixer поле has_met (=last_spoke_to>0)
+            # выставляется ТОЛЬКО через talk_checker(). Флатмейты и любые
+            # NPC, знакомство с которыми прошло через сюжетные renpy.say / touch
+            # / туториал, так и остаются has_met=False, хотя игрок с ними
+            # реально общался. Единственный надёжный признак "знаком" —
+            # это diary_people_list, куда класс Npc сам добавляет персонажа
+            # при первом meet(). Дополнительно принимаем всех с has_met=True
+            # и всех, у кого love != дефолту (значит взаимодействие было).
+            try:
+                met = []
+                seen_ids = set()
+
+                def _fmt_npc(npc):
+                    try:
+                        fname = ai_to_text(getattr(npc, '_fname', getattr(npc, 'fname', u'?')), u'?')
+                        sname = ai_to_text(getattr(npc, '_sname', getattr(npc, 'sname', u'')), u'')
+                        grp   = ai_to_text(getattr(npc, 'bio_group', u''), u'')
+                        gender = u"female" if getattr(npc, 'is_female', False) else u"male"
+                        love  = int(getattr(npc, '_love', getattr(npc, 'love', 0)) or 0)
+                        # days since last talk (может быть False → 0)
+                        _sdays = getattr(npc, 'spoke_to_days_ago', 0)
+                        try: _sdays = int(_sdays or 0)
+                        except Exception: _sdays = 0
+                        bio_short = u""
+                        try:
+                            bio_short = ai_to_text(getattr(npc, 'bio_text', u''), u'')[:220]
+                        except Exception:
+                            pass
+                        head = u"%s %s [%s, %s, love %d/100" % (
+                            fname, sname, grp or u"?", gender, love
+                        )
+                        if _sdays:
+                            head += u", last talked %dd ago" % _sdays
+                        head += u"]"
+                        if bio_short:
+                            head += u" — " + bio_short
+                        return head, id(npc)
+                    except Exception:
+                        return None, None
+
+                # Источник 1: игровой diary_people_list (самый надёжный)
+                for src_list_name in ('diary_people_list',):
+                    lst = getattr(renpy.store, src_list_name, None) or []
+                    for npc in list(lst):
+                        entry, npc_id = _fmt_npc(npc)
+                        if entry and npc_id not in seen_ids:
+                            met.append(entry)
+                            seen_ids.add(npc_id)
+
+                # Источник 2: has_met=True (через talk_checker)
+                all_npcs = getattr(renpy.store, 'npc_all', None) or []
+                for npc in list(all_npcs):
+                    try:
+                        if not bool(getattr(npc, 'has_met', False)):
+                            continue
+                        entry, npc_id = _fmt_npc(npc)
+                        if entry and npc_id not in seen_ids:
+                            met.append(entry)
+                            seen_ids.add(npc_id)
+                    except Exception:
+                        continue
+
+                # Источник 3: love изменился с дефолта. У большинства NPC
+                # стартовый love=10 (см. Npc.__init__), у emile/story-NPC
+                # обычно 0. Ловим тех, у кого love ушёл от 0/10 — значит
+                # взаимодействие было даже без talk_checker.
+                for npc in list(all_npcs):
+                    try:
+                        lv = int(getattr(npc, '_love', getattr(npc, 'love', 10)) or 0)
+                        if lv not in (0, 10):  # изменился с дефолта
+                            entry, npc_id = _fmt_npc(npc)
+                            if entry and npc_id not in seen_ids:
+                                met.append(entry)
+                                seen_ids.add(npc_id)
+                    except Exception:
+                        continue
+
+                # 16 хватает, чтобы не раздувать контекст, но покрыть флатмейтов + сюжет
+                s['met_npcs'] = met[:16]
+            except Exception as _npc_e:
+                print("met_npcs collect err: %s" % _npc_e)
+                s['met_npcs'] = []
+
+            # НОВОЕ: последние записи из ИГРОВОГО дневника (diary_list —
+            # это Diary_Class от TheFixer, а не наш ai_diary_entries).
+            # Это единственный источник canon-предыстории Саманты.
+            try:
+                diary_out = []
+                dlist = getattr(renpy.store, 'diary_list', None) or []
+                for d in list(dlist)[-10:]:
+                    try:
+                        dname = ai_to_text(getattr(d, 'name', u''), u'')
+                        ddesc = ai_to_text(getattr(d, 'description', u''), u'')[:220]
+                        dday  = int(getattr(d, 'day', 0) or 0)
+                        if dname or ddesc:
+                            diary_out.append(u"[day %d] %s — %s" % (dday, dname, ddesc))
+                    except Exception:
+                        continue
+                s['diary_entries'] = diary_out
+            except Exception as _dl_e:
+                print("diary_list collect err: %s" % _dl_e)
+                s['diary_entries'] = []
 
             try:
                 recent_npc_chats=[]
@@ -1081,7 +1897,7 @@ Guidelines:
 
         except Exception as e:
             print("get_state error %s" % e)
-            s={'fname':'Samantha','corrupt':0,'confidence':35,'fitness':20,'desire':10,'mood':70,'tired':80,'hygiene':100,'hunger':100,'money':200,'fem':25,'horny':5,'trust':40,'accept':20,'location':'home','location_outside':False,'location_population':0,'location_private':True,'location_has_cameras':False,'district':'home','outfit':'unknown','outfit_top':'','outfit_bottom':'','is_slutty':False,'is_exposed':False,'inventory':'empty','inventory_count':0,'active_quests':'none','quest_count':0,'perks':'Former man','perks_list':[],'vsex':0,'asex':0,'hsex':0,'osex':0,'sex_total':0,'is_virgin':True,'is_anal_virgin':True,'nearby_npcs':'none','weather':0,'hour':12,'day':0,'timeofday':'afternoon','weekday':'Monday','doctor_name':'Dr. Tess Brooker','doctor_role':'Institute Psychologist','institute_has_cameras_in_home':False,'institute_monitoring':'phone biometrics','recent_npc_chats':'none','last_event':'none'}
+            s={'fname':'Samantha','corrupt':0,'confidence':35,'fitness':20,'desire':10,'mood':70,'tired':80,'hygiene':100,'hunger':100,'money':200,'accept':20,'fem':20,'horny':5,'trust':40,'location':'home','location_outside':False,'location_private':True,'location_has_cameras':False,'district':'home','outfit':'unknown','outfit_top':'','outfit_bottom':'','outfit_items':'unknown','is_slutty':False,'is_exposed':False,'inventory':'(not exposed to LLM)','inventory_count':0,'active_quests':'none','quest_count':0,'perks':'Former man','perks_list':[],'vsex':0,'asex':0,'hsex':0,'osex':0,'sex_total':0,'is_virgin':True,'is_anal_virgin':True,'nearby_npcs':'none','weather':0,'hour':12,'day':0,'timeofday':'afternoon','weekday':'Monday','doctor_name':'','doctor_role':'','institute_has_cameras_in_home':False,'institute_monitoring':'phone/bracelet biometrics','recent_npc_chats':'none','last_event':'none','recent_locations':'none','recent_actions':'none','met_npcs':[],'diary_entries':[]}
         return s
 
     def ai_filter_event_by_comfort(event):
@@ -1311,9 +2127,13 @@ Guidelines:
                         p._confidence = max(0, min(100, getattr(p, '_confidence', 35) + d))
                     except Exception:
                         pass
-            if 'femininity' in eff:
-                d = _i(eff['femininity'])
-                store.ai_fem = max(0, min(100, getattr(store, 'ai_fem', 25) + d))
+            # femininity как отдельный стат выпилен: все дельты уходят в
+            # ai_accept (self-acceptance as a girl). ai_fem остаётся как
+            # алиас — чтобы старые UI-строки '[ai_fem]%' продолжали работать.
+            if 'femininity' in eff or 'accept' in eff or 'acceptance' in eff:
+                d = _i(eff.get('femininity', eff.get('accept', eff.get('acceptance', 0))))
+                store.ai_accept = max(0, min(100, getattr(store, 'ai_accept', 20) + d))
+                store.ai_fem = store.ai_accept
             if 'corrupt' in eff and p is not None and hasattr(p, 'corrupt'):
                 p.corrupt = max(0, p.corrupt + _i(eff['corrupt']))
             if 'desire' in eff and p is not None:
@@ -1361,6 +2181,242 @@ Guidelines:
                         store.inv.add(item_obj)
                 except Exception as e:
                     print("give_item err: %s" % e)
+
+            # =============================================================
+            # РАСШИРЕННЫЕ ЭФФЕКТЫ: реально меняют мир, а не только цифры.
+            # Все ключи должны совпадать с [ALLOWED EFFECTS] в промпте,
+            # иначе модель просто не будет их использовать.
+            # =============================================================
+
+            # --- 1) Опьянение / кайф / усталость / голод / гигиена / телесные ---
+            if 'drunk' in eff and p is not None and hasattr(p, 'add_drunk'):
+                try: p.add_drunk(_i(eff['drunk']))
+                except Exception as e: print("drunk apply err: %s" % e)
+            if 'high' in eff and p is not None and hasattr(p, 'add_high'):
+                try: p.add_high(_i(eff['high']))
+                except Exception as e: print("high apply err: %s" % e)
+            if 'tired' in eff and p is not None and hasattr(p, 'add_tired'):
+                try: p.add_tired(_i(eff['tired']))
+                except Exception as e: print("tired apply err: %s" % e)
+            if 'hunger' in eff and p is not None and hasattr(p, 'add_hunger'):
+                try: p.add_hunger(_i(eff['hunger']))
+                except Exception as e: print("hunger apply err: %s" % e)
+            if 'hygiene' in eff and p is not None and hasattr(p, 'add_hygiene'):
+                try: p.add_hygiene(_i(eff['hygiene']))
+                except Exception as e: print("hygiene apply err: %s" % e)
+            if 'allure' in eff and p is not None:
+                try:
+                    if hasattr(p, '_allure'):
+                        p._allure = max(0, getattr(p, '_allure', 0) + _i(eff['allure']))
+                except Exception as e: print("allure apply err: %s" % e)
+
+            # --- 2) Одежда: реально снимает слоты на модельке ---
+            if 'strip' in eff:
+                try:
+                    strip_val = eff['strip']
+                    if isinstance(strip_val, basestring):
+                        strip_slots = [strip_val]
+                    elif isinstance(strip_val, (list, tuple)):
+                        strip_slots = list(strip_val)
+                    else:
+                        strip_slots = []
+                    c_obj = getattr(store, 'c', None)
+                    if c_obj:
+                        SLOT_MAP = {
+                            u"all":     ["outfit", "dress", "top", "bottom", "bra", "pants", "shoes", "socks", "jacket", "stockings"],
+                            u"topless": ["top", "bra", "outfit", "dress"],
+                            u"bottomless": ["bottom", "pants", "outfit", "dress"],
+                            u"naked":   ["outfit", "dress", "top", "bottom", "bra", "pants", "shoes", "socks", "jacket", "stockings"],
+                        }
+                        real_slots = []
+                        for s_slot in strip_slots:
+                            key = ai_to_text(s_slot, u"").strip().lower()
+                            real_slots.extend(SLOT_MAP.get(key, [key]))
+                        stripped_names = []
+                        for slot in real_slots:
+                            try:
+                                if hasattr(c_obj, slot) and int(getattr(c_obj, slot, 0) or 0) > 0:
+                                    setattr(c_obj, slot, 0)
+                                    stripped_names.append(slot)
+                            except Exception:
+                                continue
+                        if stripped_names:
+                            try:
+                                # Обновим avatar/wardrobe, чтобы моделька перерисовалась.
+                                if hasattr(store, 'refresh_avatar'):
+                                    store.refresh_avatar()
+                            except Exception:
+                                pass
+                            summary_bits.append(u"Stripped: " + u", ".join(stripped_names))
+                            try:
+                                store.ai_notify_queue.append(u"Одежда снята: " + u", ".join(stripped_names))
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print("strip apply err: %s" % e)
+
+            # --- 3) Экипировка (если модель знает реальный item id) ---
+            if 'equip' in eff and ai_dict_like(eff.get('equip')):
+                try:
+                    c_obj = getattr(store, 'c', None)
+                    if c_obj:
+                        for slot, item_id in eff['equip'].items():
+                            try:
+                                slot = ai_to_text(slot, u"").strip().lower()
+                                iid = int(item_id)
+                                if hasattr(c_obj, slot):
+                                    setattr(c_obj, slot, iid)
+                            except Exception:
+                                continue
+                        try:
+                            if hasattr(store, 'refresh_avatar'):
+                                store.refresh_avatar()
+                        except Exception:
+                            pass
+                        summary_bits.append(u"Equipped: " + u", ".join(u"%s#%s" % (k,v) for k,v in eff['equip'].items()))
+                except Exception as e:
+                    print("equip apply err: %s" % e)
+
+            # --- 4) Пропуск времени ---
+            if 'advance_hours' in eff:
+                try:
+                    hours = _i(eff['advance_hours'])
+                    if hours > 0:
+                        t_obj = getattr(store, 't', None)
+                        if t_obj is not None and hasattr(t_obj, 'add_hour'):
+                            for _ in range(min(hours, 24)):
+                                try: t_obj.add_hour()
+                                except Exception: break
+                            summary_bits.append(u"+%dh" % hours)
+                except Exception as e:
+                    print("advance_hours err: %s" % e)
+
+            # --- 5) Перемещение на другую локацию через игровой travel_walk ---
+            if 'travel_to' in eff and eff.get('travel_to'):
+                try:
+                    loc_id = ai_to_text(eff['travel_to'], u"").strip()
+                    if loc_id:
+                        loc_obj = getattr(store, "loc_" + loc_id, None) or getattr(store, loc_id, None)
+                        if loc_obj is None:
+                            print("travel_to: unknown location '%s' — skipping" % loc_id)
+                        else:
+                            # travel_walk работает как renpy-jump-функция;
+                            # вызываем её в defer'е, чтобы не сломать текущий
+                            # ai_event_choice. Просто ставим флаг + save target.
+                            store.ai_pending_travel = loc_obj
+                            summary_bits.append(u"Travel: %s" % loc_id)
+                except Exception as e:
+                    print("travel_to err: %s" % e)
+
+            # --- 6) Запись в дневник (реальный diary_list) ---
+            if 'diary' in eff and eff.get('diary'):
+                try:
+                    diary_text = ai_to_text(eff['diary'], u"")
+                    Diary_Class = getattr(store, 'Diary_Class', None)
+                    if diary_text and Diary_Class is not None:
+                        # имя записи — короткая шапка (первые 40 символов)
+                        head = diary_text.strip().split(u"\n", 1)[0][:40] or u"AI event"
+                        try:
+                            Diary_Class(head, diary_text)
+                            summary_bits.append(u"Diary: " + head)
+                        except Exception as e2:
+                            print("Diary_Class create err: %s" % e2)
+                except Exception as e:
+                    print("diary apply err: %s" % e)
+
+            # --- 7) РИСК БЕРЕМЕННОСТИ — как после обычной сексуальной сцены ---
+            # Ключ 'pregnancy_risk' в effects говорит движку "прогони обычный
+            # преган-чек". Никакой гарантированной беременности: если день
+            # цикла не тот, есть таблетки, стоит perk_pregnant_* или просто
+            # не повезёт с numgen() — Саманту "пронесёт" ровно как в любой
+            # штатной сексуальной сцене игры (см. player_class.sex_cum_pregcheck).
+            #
+            # Допустимые значения ключа:
+            #   'insert'  — стандартный "в неё кончили" (fertility 80/x)
+            #   'inside'  — глубоко внутрь, максимальный шанс (fertility 4/x)
+            #   'pullout' — прерванный акт, минимальный шанс (fertility 30/x)
+            #   True      — трактуется как 'insert'
+            # Кому припишем "отцовство": если LLM явно передала
+            # 'pregnancy_partner': 'fname of a KNOWN NPC' — ищем этого NPC
+            # в npc_all; иначе используем встроенный fallback-NPC `unknown`
+            # ("some unknown guy"), ровно как игра делает для случайного
+            # секса без имени.
+            if 'pregnancy_risk' in eff and eff.get('pregnancy_risk'):
+                try:
+                    where_raw = eff.get('pregnancy_risk')
+                    if where_raw is True or where_raw == 1:
+                        where = "insert"
+                    else:
+                        where = ai_to_text(where_raw, u"insert").strip().lower()
+                        if where not in ("insert", "inside", "pullout"):
+                            where = "insert"
+
+                    # cum_apply в игровом коде тоже поднимает счётчик, чтобы
+                    # cum_visible/description отражали, что в ней сперма.
+                    try:
+                        if p is not None and hasattr(p, 'sex_cum_apply'):
+                            p.sex_cum_apply("cum_vagin")
+                    except Exception as e:
+                        print("preg cum_apply err: %s" % e)
+
+                    # Найдём "отца"
+                    partner = None
+                    partner_name = ai_to_text(eff.get('pregnancy_partner', u""), u"").strip()
+                    if partner_name:
+                        try:
+                            all_npcs = getattr(store, 'npc_all', None) or []
+                            pn_low = partner_name.lower()
+                            for npc in list(all_npcs):
+                                fn = ai_to_text(getattr(npc, '_fname', getattr(npc, 'fname', u'')), u'').lower()
+                                sn = ai_to_text(getattr(npc, '_sname', getattr(npc, 'sname', u'')), u'').lower()
+                                full = (fn + u" " + sn).strip()
+                                if pn_low == fn or pn_low == full or pn_low == sn:
+                                    # NAMED CHARACTERS RULE: NPC должен быть уже встречен.
+                                    if bool(getattr(npc, 'has_met', False)):
+                                        partner = npc
+                                    break
+                        except Exception as e:
+                            print("preg partner lookup err: %s" % e)
+                    if partner is None:
+                        # Fallback: анонимный отец. Именно так игра
+                        # обрабатывает секс "с кем-то на улице".
+                        partner = getattr(store, 'unknown', None)
+
+                    # Собственно прогон честной механики игры
+                    if p is not None and hasattr(p, 'sex_cum_pregcheck'):
+                        try:
+                            got_pregnant = bool(p.sex_cum_pregcheck(where))
+                        except Exception as e:
+                            print("sex_cum_pregcheck err: %s" % e)
+                            got_pregnant = False
+                        if got_pregnant and partner is not None and hasattr(p, 'preg'):
+                            try:
+                                p.preg(partner)
+                                summary_bits.append(u"⚠ Pregnancy check FIRED (%s)" % where)
+                                try:
+                                    store.ai_notify_queue.append(u"⚠ Возможна беременность")
+                                except Exception:
+                                    pass
+                            except Exception as e:
+                                print("preg apply err: %s" % e)
+                        else:
+                            summary_bits.append(u"Pregnancy check rolled (%s): safe" % where)
+                except Exception as e:
+                    print("pregnancy_risk err: %s" % e)
+
+            # --- 8) Удаление существующего перка по имени store-переменной ---
+            if 'remove_perk' in eff and eff.get('remove_perk'):
+                try:
+                    perk_var = ai_to_text(eff['remove_perk'], u"").strip()
+                    perk_obj = getattr(store, perk_var, None)
+                    if perk_obj is not None and p is not None and hasattr(p, 'remove_perk'):
+                        try:
+                            p.remove_perk(perk_obj, notif=True)
+                            summary_bits.append(u"-Perk %s" % perk_var)
+                        except Exception as e2:
+                            print("remove_perk apply err: %s" % e2)
+                except Exception as e:
+                    print("remove_perk err: %s" % e)
 
             spicy_mod = ch.get('spicy_modifier', 0)
             if spicy_mod:
@@ -1484,11 +2540,18 @@ Guidelines:
             })
 
     def ai_ensure_terminal_endings(tree):
-        """Гарантирует, что у каждого тупикового выбора есть ending_title/text и награда."""
+        """Заполняет ending_title/text/effects для choices у которых нет next_step.
+
+        ИЗМЕНЕНИЕ vs старой версии: is_ending БОЛЬШЕ НЕ ставится
+        принудительно. Раньше 'нет next_step' автоматически означало
+        'финал ветки', но с on-demand chain это неверно: null next_step =
+        'пусть игра сгенерит следующий шаг', а is_ending=true = 'финал'.
+        Теперь функция только гарантирует, что ending-поля не пустые
+        (на случай если ветка действительно закроется финалом позже).
+        """
         if not ai_dict_like(tree) or not tree.get('steps'):
             return tree
         qtitle = ai_to_text(tree.get('title', u'Quest'), u'Quest')
-        # map id -> step
         steps = [s for s in tree.get('steps', []) if ai_dict_like(s)]
         for step in steps:
             for ch in step.get('choices', []) or []:
@@ -1497,8 +2560,10 @@ Guidelines:
                 ns = ch.get('next_step')
                 if ns:
                     continue
-                # terminal choice
-                ch['is_ending'] = True
+                # НЕ ставим is_ending=True автоматически. Только заполняем
+                # ending_title/text как fallback — если choice окажется
+                # финальным (по флагу is_ending от модели или из-за MAX_STEPS),
+                # они пригодятся; иначе пусть лежат неиспользованными.
                 if not ch.get('ending_title'):
                     ch['ending_title'] = u"Outcome: %s" % ai_to_text(step.get('title', qtitle), qtitle)
                 if not ch.get('ending_text'):
@@ -1556,7 +2621,18 @@ Guidelines:
         return tree
 
     def ai_force_one_step_quest_tree(tree):
-        """TEST-режим: оставляет один шаг step1, а оба выбора сразу завершают квест."""
+        """Нормализует ОДИН step (первый шаг цепочки квеста).
+
+        РАНЬШЕ: эта функция принудительно ставила is_ending=True и
+        next_step=None на все choices — из-за чего chain-квесты никогда
+        не запускались, каждый первый выбор сразу шёл в summary.
+        ТЕПЕРЬ: is_ending сохраняется из модели. next_step тоже. Мы только:
+          - гарантируем id="step1";
+          - гарантируем текст choices и наличие ending_title/text;
+          - обрезаем список до 5 (2-4 persona + 1 escape).
+        Решение "финал или следующий шаг" принимает движок в ai_event_choice
+        по флагу is_ending.
+        """
         if not ai_dict_like(tree) or not tree.get('steps'):
             return None
         steps = [s for s in tree.get('steps', []) if ai_dict_like(s)]
@@ -1564,46 +2640,65 @@ Guidelines:
             return None
         step = steps[0]
         step['id'] = 'step1'
-        raw_choices = list(step.get('choices', []) or [])[:2]
+        raw_choices = list(step.get('choices', []) or [])[:5]
+        # НОВЫЙ ПОДХОД: если LLM отдала < 3 вариантов, добираем ДО 3 из
+        # набора реакций. Одна из них — обязательно попытка сбежать.
+        # Тексты подобраны так, чтобы работали в любой сцене, но не
+        # выглядели как «Yes»/«No».
         defaults = [
-            {"text": u"Accept the quick challenge", "effects": {"femininity": 2, "confidence": 1}, "spicy_modifier": 1},
-            {"text": u"Refuse and move on", "effects": {"confidence": 1}, "spicy_modifier": -1},
+            {"text": u"Slip into the role he expects — go quiet and pliable.",
+             "effects": {"acceptance": 3, "horny": 15, "corrupt": 8}, "spicy_modifier": 1},
+            {"text": u"Break the frame — surprise everyone with your reaction.",
+             "effects": {"confidence": 5, "allure": 10, "corrupt": 5}, "spicy_modifier": -1},
+            {"text": u"Try to slip out of the situation before it gets any worse.",
+             "effects": {"mood": -20, "tired": 15, "travel_to": "loc_home"},
+             "spicy_modifier": -3, "is_ending": True},
         ]
-        while len(raw_choices) < 2:
+        # Обязательный минимум — 3 варианта. Раньше было 2.
+        while len(raw_choices) < 3:
             raw_choices.append(defaults[len(raw_choices)])
         out = []
-        for idx, ch in enumerate(raw_choices[:2]):
+        for idx, ch in enumerate(raw_choices[:5]):
+            _def = defaults[idx] if idx < len(defaults) else defaults[-1]
             if ai_dict_like(ch):
                 try:
                     nch = dict(ch)
                 except Exception:
                     nch = {}
-                txt = ai_to_text(nch.get('text', defaults[idx]['text']), defaults[idx]['text'])
+                txt = ai_to_text(nch.get('text', _def['text']), _def['text'])
             else:
                 nch = {}
-                txt = ai_to_text(ch, defaults[idx]['text'])
+                txt = ai_to_text(ch, _def['text'])
             if not txt or txt.strip() in [u'', u'...', u'None']:
-                txt = defaults[idx]['text']
-            eff = nch.get('effects') if ai_dict_like(nch.get('effects')) else defaults[idx].get('effects', {})
+                txt = _def['text']
+            eff = nch.get('effects') if ai_dict_like(nch.get('effects')) else _def.get('effects', {})
             try:
                 eff = dict(eff)
             except Exception:
                 pass
             nch['text'] = txt
             nch['effects'] = eff
-            nch['next_step'] = None
-            nch['is_ending'] = True
+            # СОХРАНЯЕМ next_step и is_ending от модели!
+            # Если модель сказала is_ending=true — эта ветка финал.
+            # Если false / отсутствует — движок сам сгенерит следующий шаг.
+            if 'next_step' not in nch:
+                nch['next_step'] = None
+            if 'is_ending' not in nch:
+                nch['is_ending'] = False
+            # Ending-заглушка только если модель НЕ дала ничего.
             if not nch.get('ending_title'):
-                nch['ending_title'] = u"Quick Ending %s" % (idx + 1)
+                nch['ending_title'] = u"Outcome %s" % (idx + 1)
             if not nch.get('ending_text'):
-                nch['ending_text'] = u"The short test quest ends immediately after this choice. Samantha carries the result onward."
+                nch['ending_text'] = u"The scene continues from this choice."
             if not nch.get('spicy_modifier'):
-                nch['spicy_modifier'] = defaults[idx].get('spicy_modifier', 0)
+                nch['spicy_modifier'] = _def.get('spicy_modifier', 0)
             out.append(nch)
         step['choices'] = out
         tree['steps'] = [step]
         tree['_one_step_test'] = True
-        return ai_ensure_terminal_endings(tree)
+        # НЕ вызываем ai_ensure_terminal_endings — она тоже насильно
+        # is_ending=True ставит для choice без next_step. Для chain это яд.
+        return tree
 
     def ai_force_binary_quest_tree(tree):
         """Жёстко режет квест до схемы 2 -> 2: step1, step2a, step2b, четыре терминальных исхода."""
@@ -1775,6 +2870,26 @@ Guidelines:
         steps = data.get('steps') or data.get('Stages') or data.get('stages') or []
         if not steps and ai_dict_like(data.get('tree')):
             steps = data.get('tree')
+
+        # FIX: слабые/2-битные модели часто «упрощают» и вместо
+        # {"steps":[{"choices":[...]}]} возвращают плоское событие
+        # {"title","description","choices":[...]}. В one-step-тесте (и вообще
+        # когда нам достаточно одного шага) заворачиваем такой ответ в шаг сами,
+        # иначе normalize возвращает None и мы уходим в локальный fallback.
+        if (not steps) and isinstance(data.get('choices'), (list, tuple)) and len(data.get('choices')) > 0:
+            wrapped_step = {
+                "id": "step1",
+                "title": data.get('title') or data.get('name') or u"Stage 1",
+                "description": data.get('description') or data.get('desc') or u"",
+                "choices": list(data.get('choices')),
+                "outfit_suggestion": data.get('outfit_suggestion') or data.get('outfit') or {"items": [], "reason": ""},
+                "tags": data.get('tags', []) or [],
+            }
+            steps = [wrapped_step]
+            try:
+                print("ai_normalize_quest_tree: wrapped flat event into single step (LLM omitted 'steps')")
+            except Exception:
+                pass
         if not isinstance(steps, (list, tuple)):
             return None
         if AI_QUEST_ONE_STEP_TEST_MODE:
@@ -1817,8 +2932,10 @@ Guidelines:
             if not isinstance(raw_choices, (list, tuple)):
                 raw_choices = []
             norm_choices = []
-            # Внутри квестового дерева больше 2 вариантов не принимаем.
-            for ch in list(raw_choices)[:2]:
+            # 2-4 persona-варианта + опциональный escape = до 5 кнопок.
+            # Раньше стояло [:2] и все дополнительные выборы модели
+            # молча резались ещё в normalize, до попадания в UI.
+            for ch in list(raw_choices)[:5]:
                 if ai_dict_like(ch):
                     ct = ai_to_text(ch.get('text') or ch.get('Text') or ch.get('label') or ch.get('choice') or u'Continue', u'Continue')
                     if not ct or ct.strip() in [u'', u'...', u'None', u'choice1', u'choice2']:
@@ -1848,7 +2965,9 @@ Guidelines:
                         "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)) or 0,
                         "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
                         "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
-                        "is_ending": bool(ch.get('is_ending', False) or (ns is None)),
+                        # ТОЛЬКО explicit is_ending. Null next_step больше
+                        # НЕ означает финал — это триггер on-demand chain.
+                        "is_ending": bool(ch.get('is_ending', False)),
                     })
                 else:
                     norm_choices.append({"text": ai_to_text(ch, u'Continue'), "effects": {}, "next_step": None, "spicy_modifier": 0})
@@ -1962,19 +3081,31 @@ Guidelines:
             step_no = 1
         total = len(step_ids) or len(full_q.get('steps', []) or [])
         qdesc = ai_to_text(full_q.get('description', u''), u'')
-        stage_txt = u"[Stage %s/%s]" % (step_no, total)
-        if qdesc:
-            qdesc = qdesc + u" " + stage_txt
-        else:
-            qdesc = stage_txt
+        # НИКАКИХ [Stage 1/1] и т.п. в UI-тексте. Игроку не нужно видеть
+        # мета-разметку шагов. step_no / total мы сохраняем в служебных
+        # полях _step_no / _step_total — они нужны логике перехода между
+        # шагами, но НЕ выводятся пользователю.
+
+        # Склеиваем общее описание квеста и описание текущей сцены в ОДИН
+        # сплошной текст: сначала контекст квеста (что происходит в целом),
+        # потом сцена шага (что случилось прямо сейчас). Раньше это были
+        # два разных виджета в UI, и «общий текст» рисовался под сценой —
+        # то есть игрок читал результат раньше сеттинга.
+        step_desc = ai_to_text(step.get('description', u''), u'')
+        merged_desc_parts = []
+        if qdesc and qdesc.strip() not in (u'', u'...', u'None'):
+            merged_desc_parts.append(qdesc.strip())
+        if step_desc and step_desc.strip() not in (u'', u'...', u'None'):
+            merged_desc_parts.append(step_desc.strip())
+        merged_desc = u"\n\n".join(merged_desc_parts) if merged_desc_parts else step_desc
         evt = {
             "title": step.get('title', 'Quest'),
-            "description": step.get('description', ''),
+            "description": merged_desc,
             "type": "quest",
             "outfit_suggestion": step.get('outfit_suggestion', {}) or {"items": []},
             "is_quest": True,
             "quest_title": full_q.get('title', 'Quest'),
-            "quest_desc": qdesc,
+            "quest_desc": qdesc,  # оставляем в модели для истории/логов, но UI его больше не рисует отдельно
             "choices": step.get('choices', []) or [],
             "_full_quest": True,
             "_step_id": step.get('id', 'step1'),
@@ -2121,23 +3252,775 @@ Guidelines:
         }
         return ai_ensure_terminal_endings(tree)
 
+    # --- Расшифровки шкал, чтобы модель понимала цифры ---
+    def _ai_scale_word(v, scale=(("very low", 15), ("low", 35), ("medium", 60), ("high", 80), ("very high", 101))):
+        try:
+            v = int(v)
+        except Exception:
+            return "unknown"
+        for label, hi in scale:
+            if v < hi:
+                return label
+        return scale[-1][0]
+
+    def _ai_spicy_word(sp):
+        try:
+            sp = int(sp)
+        except Exception:
+            return "unknown"
+        # spicy_level в моде идёт 0..10
+        if sp <= 1:  return "wholesome / no NSFW"
+        if sp <= 3:  return "mild teasing, light flirt, no explicit sex"
+        if sp <= 5:  return "spicy: exhibitionism, groping, dirty talk"
+        if sp <= 7:  return "explicit sex, kinks, humiliation"
+        if sp <= 9:  return "hardcore explicit, rough, degradation ok"
+        return "extreme, no limits, taboo ok"
+
+    def _ai_cycle_word(stage):
+        return {
+            "no_cycle":   "no menstrual cycle yet",
+            "mens":       "menstruating (period)",
+            "foll":       "follicular phase, energetic",
+            "ovulate":    "ovulating, most fertile, high libido",
+            "lut":        "luteal phase, PMS possible",
+        }.get(stage, "unknown cycle stage")
+
+    def _ai_breast_word(idx):
+        """Размер груди в игре только A/B/C. См. TheFixer wardrobe."""
+        return {
+            0: "A-cup (small)",
+            1: "B-cup (average)",
+            2: "C-cup (large / 'massive' by Samantha's diary)",
+        }.get(int(idx or 0), "C-cup (large)")
+
+    def _ai_weather_word(w):
+        """weather_var в TheFixer: 1=sunny, 2=cloudy, 3=rain, 4=snow."""
+        try:
+            w = int(w)
+        except Exception:
+            return "unknown weather"
+        return {
+            1: "sunny / clear",
+            2: "cloudy / overcast",
+            3: "rainy",
+            4: "snowy",
+        }.get(w, "unknown weather (%s)" % w)
+
+    # Био Саманты — только её собственная дневниковая запись из старта игры.
+    # Никакой отсебятины про хендлеров, кураторов, докторов и т.п.: если у
+    # игрока такие NPC ещё не встретились, LLM не должна их выдумывать.
+    # Всё остальное (реально встреченные люди, факты сюжета) приходит в
+    # секциях [KNOWN NPCS] и [DIARY] чуть ниже, из get_state().
+    # Короткий SAMANTHA_BIO. 3 строки вместо 17. Всё, что нужно модели, — кто она
+    # физически/юридически и жёсткий запрет выдумывать NPC. Прочее (дневник,
+    # список знакомых, история) в старом промпте раздувало контекст в разы и
+    # заставляло модель галлюцинировать несуществующих докторов.
+    SAMANTHA_BIO = (
+        u"Samantha Bangtail — former man in a young female body (Institute mind-transfer, "
+        u"town of Blaston). Short girl, grey hair, brown eyes, C-cup, slight belly. "
+        u"Institute tracks her only via phone/bracelet, no cameras. "
+        u"Do NOT invent any named character not explicitly listed elsewhere in the prompt."
+    )
+
+    # Один раз тянем forbidden-текст (для всех mode).
+    def _ai_forbidden_text_cached():
+        try:
+            from ai_config_tags import ai_get_forbidden_themes_text
+            return ai_get_forbidden_themes_text()
+        except Exception:
+            return u""
+
+    # -----------------------------------------------------------------
+    # Хелперы, которые превращают ЦИФРЫ статов в ЧЕЛОВЕЧЕСКИЕ слова.
+    # Раньше в промпт валилось "hunger 100 (very high) — high = well fed"
+    # (три штуки метаданных ради одного факта "она сыта"). Теперь —
+    # только сам факт, и только если он реально важен для сцены.
+    # -----------------------------------------------------------------
+    def _ai_hunger_word(v):
+        v = int(v or 0)
+        if v <= 15: return u"starving"
+        if v <= 40: return u"hungry"
+        if v <= 75: return u"peckish"
+        return None  # сыт — не пишем вообще
+
+    def _ai_tired_word(v):
+        v = int(v or 0)
+        if v >= 90: return u"about to pass out from exhaustion"
+        if v >= 70: return u"exhausted"
+        if v >= 45: return u"tired"
+        return None  # бодра — молчим
+
+    def _ai_hygiene_word(v):
+        v = int(v or 0)
+        if v <= 15: return u"filthy, reeks"
+        if v <= 40: return u"dirty and sweaty"
+        return None  # чиста — молчим
+
+    def _ai_mood_word(v):
+        v = int(v or 0)
+        if v <= 10: return u"suicidally miserable"
+        if v <= 30: return u"depressed"
+        if v <= 45: return u"grumpy"
+        if v >= 85: return u"euphoric"
+        if v >= 70: return u"in a good mood"
+        return None  # средне — молчим
+
+    def _ai_desire_word(v):
+        v = int(v or 0)
+        if v >= 80: return u"desperately aroused, needs release"
+        if v >= 55: return u"turned on"
+        if v >= 30: return u"warm, curious"
+        return None
+
+    def _ai_horny_word(v):
+        v = int(v or 0)
+        if v >= 80: return u"soaked, aching"
+        if v >= 55: return u"visibly wet"
+        if v >= 30: return u"turned on"
+        return None
+
+    def _ai_drunk_word(v):
+        v = int(v or 0)
+        if v >= 150: return u"blackout drunk"
+        if v >= 80:  return u"very drunk, slurring"
+        if v >= 40:  return u"drunk"
+        if v >= 15:  return u"tipsy"
+        return None
+
+    def _ai_high_word(v):
+        v = int(v or 0)
+        if v >= 80: return u"very high"
+        if v >= 40: return u"high"
+        if v >= 15: return u"buzzed"
+        return None
+
+    def _ai_confidence_word(v):
+        v = int(v or 0)
+        if v <= 10: return u"cowering"
+        if v <= 30: return u"shy"
+        if v >= 80: return u"bold"
+        return None
+
+    def _ai_accept_word(v):
+        v = int(v or 0)
+        if v <= 15: return u"still thinks of herself as a man in a female body"
+        if v <= 40: return u"reluctantly getting used to being female"
+        if v >= 80: return u"fully embraces being a woman"
+        return None  # средне — можно молчать, но полезно; None = молчим
+
+    def _ai_corrupt_word(v):
+        v = int(v or 0)
+        if v >= 80: return u"morally broken, no shame left"
+        if v >= 50: return u"morally loose"
+        return None
+
+    def _ai_hair_word(v):
+        v = int(v or 0)
+        if v < 10: return u"short"
+        if v < 20: return u"chin-length"
+        if v < 30: return u"shoulder-length"
+        if v < 40: return u"long"
+        return u"very long"
+
+    def _ai_phair_word(v):
+        v = int(v or 0)
+        if v <= -8: return u"waxed bare"
+        if v <= 0:  return u"stubble"
+        if v <= 5:  return u"trimmed"
+        return u"full bush"
+
+    # -----------------------------------------------------------------
+    # РЕЛЕВАНТНЫЕ СТАТЫ. По той же логике, что перки: игра сама выбирает
+    # 2-3 стата, которые сейчас "громче всех кричат" (Саманта их реально
+    # чувствует), и подсказывает LLM, какую реакцию под какой стат делать.
+    # -----------------------------------------------------------------
+
+    # Каждый стат описан кортежем:
+    #   (base_stat_value, direction, drive_hint_low, drive_hint_high)
+    # где direction:
+    #   "extreme"  — интересен когда сильно ушёл от нормы (в любую сторону)
+    #   "high"     — интересен когда высокий
+    #   "low"      — интересен когда низкий
+    # drive_hint — короткая подсказка LLM, какую персону под этот стат делать.
+    # Скоринг рассчитывается как |отклонение от нормальной зоны| / 10.
+    # Каждый стат = (dir, norm, low_label/high_label — короткое СОСТОЯНИЕ,
+    # low_hint/high_hint — 1 фраза как это ощущается / что она делает).
+    # LABEL — это то, что LLM пишет в скобках choice.text, поэтому оно
+    # должно быть 1-2 словами и совпадать с содержимым выбора. Пример:
+    # tired=85 → label="exhausted" → choice "(exhausted) You collapse into...".
+    # Никаких "(tired)" — иначе будет диссонанс, если стат вышел за норму
+    # в противоположную сторону.
+    AI_STAT_DRIVERS = {
+        # горячее / сексуальное
+        "horny":      {"dir": "high", "norm": 30,
+                       "high_label": "aching", "high_hint": "she is soaked and aching; body demands release, harder to say no"},
+        "desire":     {"dir": "high", "norm": 30,
+                       "high_label": "aroused", "high_hint": "arousal is loud, she catches herself wanting things"},
+        # социальное / поведенческое
+        "confidence": {"dir": "extreme", "norm": 50,
+                       "low_label":  "shy",  "low_hint":  "shy, freezes, apologises, gives in to avoid conflict",
+                       "high_label": "bold", "high_hint": "bold, cuts back, holds eye contact, dominates the moment"},
+        "corrupt":    {"dir": "high", "norm": 30,
+                       "high_label": "shameless", "high_hint": "no shame left, enjoys pushing further than a normal girl would"},
+        "accept":     {"dir": "extreme", "norm": 50,
+                       "low_label":  "still-a-man", "low_hint":  "still thinks like a man in a female body, hates being touched as a girl",
+                       "high_label": "embracing-woman", "high_hint": "leans into being a woman, wants to be seen and desired that way"},
+        # состояние тела
+        "drunk":      {"dir": "high", "norm": 15,
+                       "high_label": "drunk", "high_hint": "slurring, giggling, less inhibited, poor judgement"},
+        "high":       {"dir": "high", "norm": 15,
+                       "high_label": "high", "high_hint": "floaty, giggly, sensations dialled up, cannot focus"},
+        "tired":      {"dir": "high", "norm": 40,
+                       "high_label": "exhausted", "high_hint": "exhausted, wants to lie down, easier to push around"},
+        "hunger":     {"dir": "low",  "norm": 60,
+                       "low_label":  "starving", "low_hint":  "starving, will do a lot for food or money for food"},
+        "hygiene":    {"dir": "low",  "norm": 60,
+                       "low_label":  "filthy", "low_hint":  "dirty, sweaty, embarrassed to be seen or touched"},
+        "mood":       {"dir": "extreme", "norm": 50,
+                       "low_label":  "miserable",  "low_hint":  "depressed, self-destructive, does not care what happens",
+                       "high_label": "elated", "high_hint": "euphoric, invincible, more likely to say yes to anything"},
+        "trust":      {"dir": "extreme", "norm": 50,
+                       "low_label":  "paranoid", "low_hint":  "paranoid about the Institute, keeps secrets, defiant",
+                       "high_label": "loyal",    "high_hint": "trusts the Institute, will follow directives, tells them everything"},
+    }
+
+    def ai_pick_relevant_stats(gs, k=3):
+        """Возвращает список словарей вида
+            {'name':'horny','value':90,'direction':'high',
+             'label':'aching','hint':'...','score':60.0}
+        отсортированный по силе отклонения.
+        'label' — короткое (1-2 слова) СОСТОЯНИЕ, которое LLM должна
+        писать в скобках choice.text. НЕ имя стата. Это устраняет
+        диссонанс "tired=20 но выбор 'You feel energetic'" — теперь
+        такой стат вообще не попадёт в промпт (порог 15), а если попал —
+        label покажет реальное состояние.
+        """
+        rows = []
+        for stat, spec in AI_STAT_DRIVERS.items():
+            try:
+                v = int(gs.get(stat, spec['norm']) or 0)
+            except Exception:
+                continue
+            direction = spec['dir']
+            norm = int(spec.get('norm', 50))
+            score = 0.0
+            active_dir = None
+            hint = None
+            label = None
+            if direction == "high":
+                if v > norm:
+                    score = (v - norm)
+                    active_dir = "high"
+                    hint = spec.get('high_hint')
+                    label = spec.get('high_label')
+            elif direction == "low":
+                if v < norm:
+                    score = (norm - v)
+                    active_dir = "low"
+                    hint = spec.get('low_hint')
+                    label = spec.get('low_label')
+            else:  # extreme
+                diff = v - norm
+                score = abs(diff)
+                if diff > 0:
+                    active_dir = "high"
+                    hint = spec.get('high_hint')
+                    label = spec.get('high_label')
+                elif diff < 0:
+                    active_dir = "low"
+                    hint = spec.get('low_hint')
+                    label = spec.get('low_label')
+            # Отбрасываем всё, где отклонение маленькое (стат в норме,
+            # LLM не о чем говорить). Порог 15 — примерно 15/100.
+            if score < 15 or not hint:
+                continue
+            rows.append({
+                'name': stat,
+                'value': v,
+                'direction': active_dir,
+                'score': score,
+                'label': label or stat,  # если label забыли — fallback на имя стата
+                'hint': hint,
+            })
+        rows.sort(key=lambda r: r['score'], reverse=True)
+        return rows[:k]
+
+    def ai_build_char_context(gs, mode=u"full"):
+        """ЕДИНАЯ функция «мир и Саманта» для всех LLM-генераторов.
+
+        Три режима: full / compact / minimal — разница в объёме, но подход один:
+        только те факты, которые РЕАЛЬНО важны сейчас, и человеческими словами,
+        а не таблицами цифр.
+        """
+        _forbidden_text = _ai_forbidden_text_cached()
+
+        # Собираем "human state" — короткие фразы про то, что реально
+        # ощущается сейчас. Молчаливые (=None) значения не пишем.
+        human = []
+        for word in (
+            _ai_hunger_word(gs.get('hunger', 100)),
+            _ai_tired_word(gs.get('tired', 0)),
+            _ai_hygiene_word(gs.get('hygiene', 100)),
+            _ai_mood_word(gs.get('mood', 70)),
+            _ai_desire_word(gs.get('desire', 0)),
+            _ai_horny_word(gs.get('horny', 0)),
+            _ai_drunk_word(gs.get('drunk', 0)),
+            _ai_high_word(gs.get('high', 0)),
+            _ai_confidence_word(gs.get('confidence', 35)),
+            _ai_accept_word(gs.get('accept', 20)),
+            _ai_corrupt_word(gs.get('corrupt', 0)),
+        ):
+            if word:
+                human.append(word)
+        human_state = u", ".join(human) if human else u"neutral state"
+
+        loc      = ai_to_text(gs.get('location', u'home'), u'home')
+        loc_desc = ai_get_location_description(loc) or u""
+        hour     = int(gs.get('hour', 12) or 12)
+        tod      = ai_to_text(gs.get('timeofday', u''), u'')
+        weather  = _ai_weather_word(gs.get('weather', 0))
+        private  = bool(gs.get('location_private', True))
+
+        outfit_items = ai_to_text(gs.get('outfit_items', gs.get('outfit', u'unknown')), u'unknown')
+        exposure = u""
+        if bool(gs.get('is_exposed', False)):
+            exposure = u" (intimate parts EXPOSED)"
+        elif bool(gs.get('is_slutty', False)):
+            exposure = u" (slutty look)"
+
+        perks = ai_to_text(gs.get('perks', u'Former man'), u'Former man')
+
+        cycle_stage = ai_to_text(gs.get('cycle_stage', u'no_cycle'), u'no_cycle')
+        cycle_hint  = _ai_cycle_word(cycle_stage)  # уже словом
+        preg_flag   = u", PREGNANT" if bool(gs.get('is_pregnant', False)) else u""
+        lact_flag   = u", lactating" if bool(gs.get('is_lactating', False)) else u""
+
+        # Виргинство. Пишем только если она ещё девственница — сам факт
+        # для LLM важен (для персон и последствий).
+        virgin_parts = []
+        if bool(gs.get('is_virgin', True)):
+            virgin_parts.append(u"vag virgin")
+        if bool(gs.get('is_anal_virgin', True)):
+            virgin_parts.append(u"anal virgin")
+        virgin_str = (u"; " + u", ".join(virgin_parts)) if virgin_parts else u""
+
+        recent_acts = ai_to_text(gs.get('recent_actions', u''), u'')
+        last_evt    = ai_to_text(gs.get('last_event', u''), u'')
+
+        spicy_level = gs.get('spicy_level', 2)
+        spicy_word  = _ai_spicy_word(spicy_level)
+        allowed_tags = ai_to_text(gs.get('allowed_tags', u'femininity, crossdressing'), u'femininity, crossdressing')
+
+        # ------- minimal (для dirty-talk во время секса) -------
+        if mode == u"minimal":
+            base = u"Samantha (former man in female body), at %s, %s. spicy=%s (%s)." % (
+                loc, human_state, spicy_level, spicy_word
+            )
+            if _forbidden_text:
+                base += u"\n[FORBIDDEN]\n" + _forbidden_text
+            return base
+
+        # ------- compact (SMS / diary / trainer / wardrobe) -------
+        if mode == u"compact":
+            lines = []
+            lines.append(u"[SAMANTHA]")
+            lines.append(SAMANTHA_BIO)
+            lines.append(u"State: " + human_state + u".")
+            lines.append(u"Cycle: %s%s%s%s." % (cycle_hint, preg_flag, lact_flag, virgin_str))
+            lines.append(u"Wearing: %s%s." % (outfit_items, exposure))
+            lines.append(u"Perks: %s." % perks)
+            lines.append(u"Location: %s (%s). %s %02d:00, %s. %s." % (
+                loc, loc_desc or u"?", tod or u"?", hour, weather,
+                u"private" if private else u"public"
+            ))
+            lines.append(u"spicy=%s (%s). Allowed themes: %s." % (spicy_level, spicy_word, allowed_tags))
+            if _forbidden_text:
+                lines.append(u"[FORBIDDEN]")
+                lines.append(_forbidden_text)
+            return u"\n".join(lines)
+
+        # ------- full (квесты) -------
+        lines = []
+        lines.append(u"[SAMANTHA]")
+        lines.append(SAMANTHA_BIO)
+
+        # Тело + одежда. Волосы/лобок только если сильно вне нормы —
+        # обычно они не двигают сцену.
+        body_bits = [u"C-cup"]
+        _hl = int(gs.get('hair_length', 0) or 0)
+        if _hl >= 30 or _hl < 10:  # только длинные или короткие
+            body_bits.append(_ai_hair_word(_hl) + u" hair")
+        _ph = int(gs.get('pubic_hair', 0) or 0)
+        if _ph <= -5 or _ph >= 8:  # только waxed или full bush
+            body_bits.append(_ai_phair_word(_ph))
+        lines.append(u"Body: " + u", ".join(body_bits) + virgin_str + u".")
+        lines.append(u"Wearing: " + outfit_items + exposure + u".")
+
+        # ЦИКЛ — только если важен для сцены. Короткие пометки.
+        _cs = ai_to_text(gs.get('cycle_stage', u''), u'').lower()
+        if _cs == u"ovulate":
+            lines.append(u">>> OVULATING: peak fertility, body sensitive.")
+        elif _cs == u"mens":
+            lines.append(u">>> ON PERIOD: bleeding, cramps.")
+        if bool(gs.get('is_pregnant', False)):
+            lines.append(u">>> PREGNANT.")
+        if bool(gs.get('is_lactating', False)):
+            lines.append(u">>> LACTATING.")
+
+        # Состояние (Feeling) в full-режиме НЕ выводим — оно дублирует
+        # блок STATS в DRIVERS ниже. В compact-режиме оставили, там
+        # DRIVERS-блока нет.
+
+        # РЕЛЕВАНТНЫЕ ДРАЙВЕРЫ — ЕДИНЫЙ ПУЛ.
+        # Раньше строго 3 перка + 3 стата. Проблема: часто у Саманты
+        # 5 фоновых перков со score=0.5 (только 'always'), а один стат
+        # вылетает на 90/100 (например, drunk=90). Логичнее показать
+        # LLM топ-5 драйверов ВООБЩЕ, независимо от типа.
+        #
+        # Скоринг:
+        #   perks    — сумма совпавших тегов (0..~5)
+        #   stats    — |отклонение_от_нормы| / 20 (чтобы 100-отклонение = 5.0,
+        #              сопоставимо с максимально релевантным перком)
+        # ОБЩИЙ ЛИМИТ 5 суммарно — хоть 5 статов, хоть 5 перков, хоть микс.
+        # Никаких MIN_EACH_KIND: если у Саманты все статы в норме и 5
+        # релевантных перков — пусть будут 5 перков. И наоборот.
+        TOTAL_DRIVERS = 5
+
+        perks_detailed = gs.get('perks_detailed', []) or []
+        try:
+            from ai_config_perks import ai_score_all_perks
+            scored_perks_raw = ai_score_all_perks(gs, perks_detailed)
+        except Exception as _rpe:
+            print("ai_score_all_perks err: %s" % _rpe)
+            scored_perks_raw = [{'entry': p, 'name': str(p).split(":",1)[0].strip(),
+                                 'score': 0.0, 'idx': i} for i, p in enumerate(perks_detailed)]
+
+        try:
+            # Без cap: пусть в пул попадёт всё, что вышло за порог 15.
+            scored_stats_raw = ai_pick_relevant_stats(gs, k=99)
+        except Exception as _rse:
+            print("ai_pick_relevant_stats err: %s" % _rse)
+            scored_stats_raw = []
+
+        # Единый пул с нормализованным score
+        pool = []
+        for pr in scored_perks_raw:
+            pool.append({'kind': 'perk', 'score': float(pr['score']), 'data': pr})
+        for st in scored_stats_raw:
+            pool.append({'kind': 'stat', 'score': float(st['score']) / 20.0, 'data': st})
+
+        pool.sort(key=lambda x: x['score'], reverse=True)
+        chosen = pool[:TOTAL_DRIVERS]
+
+        # Разбираем по типам ТОЛЬКО для красивого вывода двумя подсписками.
+        # На функциональность лимит уже отработан на pool.
+        top_perks = [c['data'] for c in chosen if c['kind'] == 'perk']
+        top_stats = [c['data'] for c in chosen if c['kind'] == 'stat']
+
+        n_perks = len(top_perks)
+        n_stats = len(top_stats)
+        lines.append(u">>> DRIVERS (make ONE choice per each — %d perk + %d stat = %d total):"
+                     % (n_perks, n_stats, n_perks + n_stats))
+
+        if top_perks:
+            lines.append(u"  PERKS:")
+            for pr in top_perks:
+                lines.append(u"    - " + ai_to_text(pr['entry'], u""))
+        if top_stats:
+            lines.append(u"  STATS:")
+            for st in top_stats:
+                # Показываем LLM ГОТОВЫЙ КОРОТКИЙ ЯРЛЫК состояния — то же,
+                # что она обязана использовать в скобках choice.text. Так
+                # 'tired=20 -> energetic' не даст диссонанс "(tired) но энергична".
+                # См. ai_pick_relevant_stats: st['label'] уже вычислен.
+                lines.append(u"    - %s -> %s"
+                             % (st.get('label') or st['name'], st['hint']))
+        if not top_perks and not top_stats:
+            lines.append(u"  (nothing loud — write 2 generic 'go with it' / 'resist' choices)")
+        # rest_perks (фоновые перки) в промпт НЕ выводим — LLM всё равно
+        # запрещено строить под них choices, и без них экономим ~30-80 токенов.
+        lines.append(u"")
+
+        # Локация — крупным блоком, потому что LLM на IQ2 систематически
+        # игнорирует локацию и переносит сцену в бар/спальню из примера.
+        priv_word = u"private" if private else u"public"
+        lines.append(u">>> LOCATION (the scene MUST happen here): %s" % loc)
+        lines.append(u">>> Location vibe: %s" % (loc_desc or u"(no description)"))
+        lines.append(u">>> Setting: %s, %s, %s at %02d:00. Cash: %s." % (
+            priv_word, weather, tod or u"?", hour, gs.get('money', 0)
+        ))
+        lines.append(u"")
+
+        # Недавняя история — только если есть что-то нетривиальное
+        if recent_acts and recent_acts not in (u"none", u""):
+            lines.append(u"Recent: " + recent_acts + u".")
+        if last_evt and last_evt not in (u"none", u""):
+            lines.append(u"Prev event: " + last_evt + u".")
+
+        # Темы
+        lines.append(u"spicy=%s (%s). Allowed themes: %s." % (spicy_level, spicy_word, allowed_tags))
+
+        # Forbidden — inline, коротким списком
+        if _forbidden_text:
+            lines.append(u"[FORBIDDEN]")
+            lines.append(_forbidden_text)
+
+        return u"\n".join(lines)
+
+    def ai_prefix_world_state(user_prompt, gs, mode=u"full", header=u"[WORLD STATE]"):
+        """Обёртка: префиксит к user_prompt блок 'состояние мира и Саманты'.
+
+        Используется всеми генераторами (event, quest, sms, diary, dirty, npc_full,
+        report, hourly, arrival и т.д.), чтобы у них был ЕДИНЫЙ общий взгляд на
+        мир. Каждый генератор пишет ТОЛЬКО свою часть (что нужно сгенерировать
+        и в каком формате отвечать), а мир пишет всегда одна функция.
+        """
+        try:
+            ctx = ai_build_char_context(gs, mode=mode)
+        except Exception as e:
+            print("ai_prefix_world_state ctx err: %s" % e)
+            ctx = u""
+        parts = []
+        if header:
+            parts.append(ai_to_text(header, u""))
+        if ctx:
+            parts.append(ctx)
+        parts.append(u"\n[TASK]")
+        parts.append(ai_to_text(user_prompt, u""))
+        return u"\n".join(parts)
+
+    # Ключи эффектов, которые НЕ считаются "значимыми" сами по себе.
+    # Если у выбора вообще нет ничего сверх этого — квест бракуем и
+    # просим модель попробовать ещё раз (см. ai_quest_has_meaningful_choices).
+    # Эти ключи сами по себе не считаются "мировыми изменениями" — плюс
+    # к confidence на 2 не должен быть единственным итогом квеста.
+    AI_CHOICE_TRIVIAL_KEYS = frozenset([
+        u"confidence", u"mood", u"accept", u"acceptance", u"femininity",
+        u"spicy_modifier", u"trust",
+    ])
+
+    # Явные yes/no-фразы, которые бракуем в choice.text независимо от effects.
+    # Короткие тексты ('Fuck it.', 'Kneel.') не блокируем — они бывают
+    # валидными inner-stance-персонами. Проверка длины УБРАНА.
+    AI_CHOICE_BANNED_TEXT_PATTERNS = (
+        u"^yes[.! ]*$", u"^no[.! ]*$", u"^okay[.! ]*$", u"^ok[.! ]*$", u"^sure[.! ]*$",
+        u"^agree[.! ]*$", u"^accept[.! ]*$", u"^decline[.! ]*$", u"^refuse[.! ]*$",
+        u"^say yes\\b", u"^say no\\b",
+        u"^walk away[.! ]*$", u"^leave[.! ]*$", u"^ignore[.! ]*$", u"^back away\\b",
+        u"^go with him[.! ]*$", u"^go with her[.! ]*$",
+        u"^follow him[.! ]*$", u"^follow her[.! ]*$",
+        u"^continue$", u"^continue text",
+        # МОДЕЛЬ БУКВАЛЬНО КОПИРУЕТ PLACEHOLDER'Ы ИЗ ПРОМПТА. Бракуем.
+        u"persona [ABC]", u"inner-stance", u"<.*persona", u"^<.+>$",
+        u"fill in", u"example:",
+    )
+    _AI_CHOICE_BANNED_RE = re.compile(
+        u"|".join(AI_CHOICE_BANNED_TEXT_PATTERNS),
+        re.IGNORECASE
+    )
+
+    # -----------------------------------------------------------------
+    # СИСТЕМА "БОЛЬШИХ ДЕЛЬТ".
+    # Модель по умолчанию пишет +2/+3 к статам ("выпила бутылочку → +3 horny").
+    # Это делает квест НЕ значимым: игра почти не меняется. Правильно
+    # заставить её либо описать РЕАЛЬНО крупное событие (+60 horny —
+    # значит секс, а не глоток вина), либо отказаться от этого хода.
+    # Правило: если делать большие дельты, квест обязан их отработать
+    # текстом — вот и всё, откуда берётся "большое событие".
+    # -----------------------------------------------------------------
+    # Ключи, для которых имеет смысл шкалировать до 60-100.
+    AI_BIG_DELTA_STAT_KEYS = frozenset([
+        u"horny", u"desire", u"drunk", u"high", u"mood", u"tired",
+        u"hygiene", u"hunger", u"corrupt", u"allure", u"confidence",
+        u"accept", u"acceptance", u"femininity", u"trust", u"money",
+    ])
+    # Что считаем "большим":
+    #   >= 40 (или <= -40)  — точно большое
+    #   >= 20 (или <= -20)  — среднее, приемлемо для 1 из выборов, но
+    #                          нужен ещё хоть один >=40 в дереве, иначе всё вялое.
+    # Пользователь: обычная жизнь двигает статы на 30-80 в день. Значит
+    # квест-как-СОБЫТИЕ должен давать сравнимую или большую дельту.
+    # Правила ДВУХУРОВНЕВЫЕ:
+    #   MIN_PER_CHOICE — планка для КАЖДОГО выбора (иначе он "вялый").
+    #   MIN_ONE_PEAK   — хотя бы ОДИН выбор в дереве должен быть выше этого
+    #                    (это и есть тот самый reshape-day / broken-forever
+    #                    момент, ради которого квест вообще запускался).
+    # Мировой ключ (strip/travel_to/...) засчитывается как обе планки сразу.
+    AI_BIG_DELTA_MIN_PER_CHOICE = 60   # KAJDЫЙ выбор ≥ 60
+    AI_BIG_DELTA_MIN_ONE_PEAK   = 100  # ХОТЯ БЫ ОДИН ≥ 100
+
+    # Legacy aliases на случай, если где-то ещё используются (safety).
+    AI_BIG_DELTA_MIN_STRONG = AI_BIG_DELTA_MIN_PER_CHOICE
+    AI_BIG_DELTA_MIN_MEDIUM = 30
+
+    # Мировые ключи (strip / travel_to / diary / perk_add / pregnancy_risk /
+    # remove_perk / equip / give_item / advance_hours) сами по себе тянут
+    # на "большое событие" — им шкала не нужна.
+    AI_WORLD_ROOT_KEYS = frozenset([
+        u"perk_add", u"travel_to", u"strip", u"diary", u"pregnancy_risk",
+        u"remove_perk", u"equip", u"give_item", u"advance_hours",
+    ])
+
+    def _ai_choice_max_abs_delta(ch):
+        """Возвращает максимальный |int| среди stat-дельт в choice.effects.
+        Мировые ключи (strip/travel_to/pregnancy_risk/...) считаются как
+        peak-событие и возвращают AI_BIG_DELTA_MIN_ONE_PEAK — этого достаточно
+        и для планки-на-выбор, и для планки-на-дерево одновременно."""
+        if not ai_dict_like(ch):
+            return 0
+        eff = ch.get('effects') or {}
+        if not ai_dict_like(eff):
+            eff = {}
+        # Мировой ключ на корне choice или в effects → это уже пик.
+        for root_key in AI_WORLD_ROOT_KEYS:
+            if ch.get(root_key) or (root_key in eff and eff.get(root_key)):
+                return AI_BIG_DELTA_MIN_ONE_PEAK
+        m = 0
+        for k, v in eff.items():
+            try:
+                kk = unicode(k).lower()
+            except Exception:
+                continue
+            if kk not in AI_BIG_DELTA_STAT_KEYS:
+                continue
+            try:
+                iv = abs(int(v))
+            except Exception:
+                continue
+            if iv > m:
+                m = iv
+        return m
+
+    def _ai_choice_is_meaningful(ch):
+        """True, если у выбора есть хоть один эффект за пределами тривиального
+        И текст не выглядит как 'yes/no'. Проверка МАСШТАБА эффекта делается
+        отдельно, на уровне дерева (see ai_quest_has_meaningful_choices)."""
+        if not ai_dict_like(ch):
+            return False
+        try:
+            txt = ai_to_text(ch.get('text', u''), u'').strip()
+        except Exception:
+            txt = u''
+        if not txt or _AI_CHOICE_BANNED_RE.search(txt):
+            return False
+
+        eff = ch.get('effects') or {}
+        if not ai_dict_like(eff):
+            eff = {}
+        keys = set()
+        for k in eff.keys():
+            try:
+                keys.add(unicode(k).lower())
+            except Exception:
+                pass
+        world_keys = keys - AI_CHOICE_TRIVIAL_KEYS
+        for root_key in AI_WORLD_ROOT_KEYS:
+            if ch.get(root_key):
+                world_keys.add(root_key)
+        return len(world_keys) > 0
+
+    def ai_quest_has_meaningful_choices(tree):
+        """МЯГКАЯ проверка. Единственное, что реально бракуем — квесты, где
+        ВСЕ выборы это yes/no/agree/refuse текстом ИЛИ где вообще ни один
+        выбор не двигает мир (все с +5 к mood и всё). Всё остальное пускаем.
+
+        Раньше валидатор жёстко требовал >= 60 для каждого + >= 100 хотя бы
+        для одного, и заставлял модель перегенерить. По факту это тратило
+        время и деньги на retry, а модель под страхом лучше не пишет.
+        """
+        try:
+            if not ai_dict_like(tree):
+                return False
+            steps = tree.get('steps') or []
+            if not steps:
+                return False
+            saw_any_peak = False
+            for st in steps:
+                choices = st.get('choices') if ai_dict_like(st) else []
+                if not choices:
+                    return False
+                # Хотя бы один выбор должен быть не-пресным — иначе весь
+                # квест это болтовня.
+                any_meaningful = False
+                for ch in choices:
+                    if _ai_choice_is_meaningful(ch):
+                        any_meaningful = True
+                    # peak считаем по всему дереву
+                    if _ai_choice_max_abs_delta(ch) >= AI_BIG_DELTA_MIN_ONE_PEAK:
+                        saw_any_peak = True
+                if not any_meaningful:
+                    return False
+            # peak — приятно иметь, но не блокируем квест если его нет.
+            # Просто отметим в логе через ai_set_event_debug выше.
+            return True
+        except Exception as e:
+            print("ai_quest_has_meaningful_choices err: %s" % e)
+            return True
+
     def generate_full_quest(gs):
         """Генерирует дерево. Несколько попыток + локальный fallback."""
-        recent_acts = " / ".join(getattr(store, 'ai_recent_actions', [])[-4:]) if getattr(store, 'ai_recent_actions', []) else "None"
         loc_desc = ai_get_location_description(gs['location'])
         spicy_level = gs.get('spicy_level', 2)
         is_spicy = gs.get('is_spicy', False)
         allowed_tags = gs.get('allowed_tags', 'femininity, crossdressing')
 
-        compact_user = (
-            "Make ONE ultra-compact JSON quest for Samantha. "
-            "loc=%s (%s); fem=%s; conf=%s; outfit=%s; time=%s; spicy=%s; tags=%s; recent=%s. "
-            "Exactly 1 step named step1. Exactly 2 choices. Both choices are terminal: next_step null. "
-            "Each choice needs effects, ending_title, ending_text. Keep it one short scene. Only JSON."
-        ) % (
-            gs.get('location', 'home'), loc_desc, gs.get('fem', 25), gs.get('confidence', 35),
-            gs.get('outfit', ''), gs.get('timeofday', ''), spicy_level, allowed_tags, recent_acts
+        # Общий «мир + Саманта» через единую функцию. Локальная задача — только
+        # структура ответа. Никакого ручного сбора статов, чтобы все генераторы
+        # видели мир одинаково.
+        # TASK: минимум. Основные правила и подробный worked example уже в
+        # sys_prompt (kv_sys / one_sys). Здесь только напоминание сути.
+        # step_no пробрасываем в промпт из вызывающего кода (chain-режим).
+        # Если это первый шаг цепочки — просто вводная. Если 2-й..N-й — LLM
+        # видит контекст предыдущего выбора. Если N == QUEST_MAX_STEPS-1 —
+        # LLM предупреждается, что следующий шаг должен быть финалом.
+        step_no = int(gs.get('_chain_step_no', 1) or 1)
+        max_steps = AI_QUEST_MAX_STEPS
+        prev_scene = ai_to_text(gs.get('_chain_prev_scene', u''), u'')
+        prev_choice = ai_to_text(gs.get('_chain_prev_choice', u''), u'')
+
+        # chain_hdr: только для 2+ шага — на 1-м стандартный старт, ничего
+        # добавлять не надо. На финальном шаге принудительно просим is_ending
+        # на всех выборах (движок всё равно продублирует, но LLM полезно знать).
+        chain_hdr = u""
+        if step_no > 1:
+            chain_hdr = (
+                u"[STEP %d/%d] Continue from previous choice, do not restart.\n"
+                u"Prev scene: %s\n"
+                u"Prev choice: %s\n"
+                % (step_no, max_steps, prev_scene[:280], prev_choice[:140])
+            )
+            if step_no >= max_steps:
+                chain_hdr += u"FINAL STEP — set is_ending=true on ALL choices.\n"
+            elif step_no >= max_steps - 1:
+                chain_hdr += u"Next step must resolve — start closing threads.\n"
+
+        # TASK — минимум. Полные правила уже в system-prompt (kv_sys / one_sys).
+        # Здесь только: chain-header (если 2+ шаг) + суть текущего задания.
+        task = (
+            chain_hdr +
+            u"\n"
+            u"Write ONE step grounded in [SAMANTHA] above.\n"
+            u"Open MID-ACTION (something already being done to her, no small talk).\n"
+            u"step_desc: 8-14 sentences of concrete prose.\n"
+            u"\n"
+            u"For EACH driver in [DRIVERS] above, write ONE choice using that\n"
+            u"perk/stat as the persona flavor. Then add ONE escape choice.\n"
+            u"If [DRIVERS] is empty, write 2 generic 'go with it' / 'resist' + escape.\n"
+            u"choice.text = SECOND-PERSON action Samantha does ('You ...'), not what\n"
+            u"the world does around her. 'You clamp your legs shut.' YES.\n"
+            u"'He does not notice you.' / 'Stay quiet like a mouse.' NO.\n"
+            u"\n"
+            u"Deltas: mix one big change (40-200) with small nudges (5-20). At least\n"
+            u"one choice should use a WORLD KEY (strip / travel_to / pregnancy_risk /\n"
+            u"perk_add / remove_perk / diary / equip / give_item / advance_hours) —\n"
+            u"they are under-used but they physically change the game.\n"
+            u"\n"
+            u"is_ending=true only on a choice that CLOSES the scene. Otherwise the\n"
+            u"game will ask you for the next step.\n"
+            u"\n"
+            u"ending_text 6-10 sentences, concrete (body, place, who saw, what changed)."
         )
+        compact_user = ai_prefix_world_state(task, gs, mode=u"full")
 
         attempts = [
             # 1) compact + format json
@@ -2147,11 +4030,110 @@ Guidelines:
             # 3) full prompt last try
             dict(sys_prompt=PROMPTS["event_full"], user=compact_user, temp=0.5, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=True, label=u"tree-full-json"),
         ]
+        # Мягкий KV-промпт: НЕ просим JSON вообще. Слабым 2-битным GGUF
+        # (в т.ч. Dirty-Muse i1-IQ2_XS) такое даётся сильно надёжнее.
+        # Парсер ai_parse_kv_quest соберёт из этого нужный dict сам.
+        # KV-промпт. Пример полностью проработан от начала до конца — модель
+        # копирует стиль, а не placeholder-плашки. Никаких '<persona A>' —
+        # слабые GGUF копируют их дословно.
+        kv_sys = u"""Write ONE step of a TheFixer chain quest for Samantha.
+Plain KEY: value text — no JSON, no markdown, no "-"/"*"/"**" bullets.
+Each line is either "KEY: value" or a continuation of the previous value.
+
+GROUNDING (must-follow):
+- SETTING = Samantha's CURRENT location (from [SAMANTHA]). Park = park, home = home. Match the vibe.
+- NAMED CHARACTERS only from WORLD STATE. If none listed — anonymous: "a man", "the jogger", "the shopkeeper". Never invent names.
+
+Template (SHAPE only — do NOT copy the venue or the "A_MAN_1"-style names):
+
+TITLE: <scene title>
+DESC: <one-line summary>
+STEP: step1
+STEP_TITLE: <stage title>
+STEP_DESC: A_MAN_1 has already slid his hand up your bare thigh under the counter. A_MAN_2 watches from the next seat. The music is loud enough that no one else notices. <continue 8-14 sentences, grounded in CURRENT location + outfit>
+CHOICE: (shy) You collapse into the role he expects — voice cracks, eyes wet.
+EFFECTS: horny=+90, strip=bra, corrupt=+50, mood=+15
+ENDING_TITLE: Good girl
+ENDING_TEXT: <6-10 sentences of concrete consequence>
+CHOICE: (still-a-man) You weaponize the male mind you still have — say back exactly what a guy would.
+EFFECTS: desire=+110, allure=+70, remove_perk=perk_shy, corrupt=+40
+ENDING_TITLE: Reversed
+ENDING_TEXT: <6-10 sentences>
+CHOICE: (aching) You stop pretending and press back against his hand.
+EFFECTS: horny=+140, corrupt=+80, strip=panties, diary=I chose it.
+ENDING_TITLE: Given in
+ENDING_TEXT: <6-10 sentences>
+CHOICE: (escape) You try to slip out.
+EFFECTS: travel_to=loc_home, mood=-60, tired=+40
+IS_ENDING: true
+ENDING_TITLE: Bolted
+ENDING_TEXT: <6-10 sentences (successful escape OR failed attempt)>
+
+The "(word)" prefix on each CHOICE is a SHORT STATE-LABEL: for perk-driven choices use the perk name in lowercase; for stat-driven choices use the ready label the game gave you in [DRIVERS] (like "aching", "shy", "bold", "exhausted", "starving"). NEVER put the raw stat name if it contradicts the state — e.g. do NOT write "(tired)" for an energetic choice; the label already reflects the actual state.
+
+Rules:
+1) CHOICES = ONE per each driver from [DRIVERS] in WORLD STATE (game pre-picked them). Then ONE escape. Total 3-6.
+2) Each CHOICE.TEXT is written in SECOND PERSON ("You ..."), describing what SAMANTHA actively does / says / thinks in reaction to the scene — never what the other people do to her, never third-person. Examples: "You lower your eyes and let your voice go small.", "You bite down on his shoulder to make him stop.", "You freeze completely and let it happen." NOT: "He does not notice you.", "Someone looks at you.", "Try to stay quiet like a mouse." — a choice is HER action, not the world's reaction.
+3) Mix deltas: one big (40-200) + small nudges (5-20). At least one choice uses a WORLD KEY (strip, travel_to, pregnancy_risk, perk_add, remove_perk, diary, equip, give_item, advance_hours) — they are under-used.
+4) STEP_DESC: 8-14 sentences opening MID-ACTION.
+5) ENDING_TEXT: 6-10 sentences of concrete consequence.
+6) IS_ENDING: true only if the branch CLOSES the scene naturally. Otherwise omit — game asks for next step.
+7) Do NOT copy "A_MAN_1" / "Marcus" / "Devon" from the template — use anonymous or WORLD STATE names.
+8) Nothing after the last ENDING_TEXT."""
+        kv_user = compact_user + u"\n\nRemember: reply in the KEY: value format above, not JSON."
+
         if AI_QUEST_ONE_STEP_TEST_MODE:
-            # Тест: ровно ОДИН максимально лёгкий запрос. Если он не прошёл — это видно в llm_failed_reason.
-            one_sys = u"""Return only one valid JSON object for a one-step TheFixer quest. Shape: {"title":"","description":"","steps":[{"id":"step1","title":"","description":"","choices":[{"text":"","next_step":null,"effects":{"femininity":1},"ending_title":"","ending_text":""},{"text":"","next_step":null,"effects":{"confidence":1},"ending_title":"","ending_text":""}]}]}. No markdown."""
+            # Тест: одношаговый квест. Даём 3 попытки, а не одну, потому что
+            # 2-битные GGUF стабильно валят первую (нет ключа 'steps', пустой ответ, битый JSON).
+            # JSON-схема с ПОЛНОСТЬЮ ЗАПОЛНЕННЫМ примером. Никаких placeholder-
+            # плашек "<persona A>" — 2-битные модели их дословно копируют.
+            one_sys = u"""Return ONLY one JSON object, no prose/markdown/code fences.
+
+GROUNDING (override the example if it conflicts):
+- SETTING = Samantha's CURRENT location from WORLD STATE. Park=park, home=home. NOT what example uses.
+- NAMED CHARACTERS only from WORLD STATE. If none — anonymous "a man"/"the shopkeeper". Never invent names.
+
+Shape example (SHAPE only, do not copy contents):
+{"title":"<title>", "description":"<summary>",
+ "steps":[{"id":"step1", "title":"<stage title>",
+   "description":"<8-14 sentences MID-ACTION, in CURRENT location>",
+   "choices":[
+     {"text":"You go small and pliable.", "next_step":null, "is_ending":false,
+      "effects":{"horny":80,"strip":"bra","corrupt":40,"mood":15,"diary":"..."},
+      "ending_title":"Good girl", "ending_text":"<6-10 sentences>"},
+     {"text":"You cut him down with words.", "next_step":null, "is_ending":false,
+      "effects":{"desire":90,"allure":70,"remove_perk":"perk_shy","corrupt":60}},
+     {"text":"You freeze and dissociate.", "next_step":null, "is_ending":false,
+      "effects":{"mood":-220,"tired":80,"hygiene":-70,"diary":"Lost an hour."}},
+     {"text":"You try to slip out and get home.", "next_step":null, "is_ending":true,
+      "effects":{"travel_to":"loc_home","mood":-80,"tired":60}}
+   ]}]}
+
+Rules:
+- "steps" = list of length 1, id "step1".
+- 3-6 choices: ONE per each driver in [DRIVERS] + ONE escape. Each choice.text is SECOND-PERSON action by Samantha ("You ..."), never a description of what others do around her. Never "yes"/"no".
+- Mix deltas: one big (40-200) + small nudges (5-20). Prefer WORLD KEYS (strip, travel_to, pregnancy_risk, perk_add, remove_perk, diary, equip, give_item, advance_hours) — under-used.
+- description: 8-14 sentences MID-ACTION in CURRENT location.
+- ending_text: 6-10 sentences concrete consequence.
+- is_ending:true only if branch closes the scene; else omit — game asks for next step.
+- Output raw JSON only."""
+            one_sys_flat = u"""Return ONLY one JSON object, no prose/markdown.
+Flat shape (game wraps it): {"title":"","description":"<8-14 sentences mid-scene>","choices":[
+  {"text":"persona reaction","effects":{"horny":90,"strip":"bra","corrupt":40,"mood":15},"ending_title":"","ending_text":"<6-10 sentences>","is_ending":false},
+  {"text":"different persona","effects":{"desire":100,"travel_to":"loc_home","diary":"...","tired":30},"ending_title":"","ending_text":"<6-10 sentences>","is_ending":true}
+]}
+3-6 choices, one per driver in [DRIVERS] + escape. Each choice.text is SECOND-PERSON action by Samantha ("You ..."), her active reaction — not what others do around her. Never yes/no. Mix deltas. Prefer world keys. is_ending:true = branch closes. Raw JSON only."""
             attempts = [
-                dict(sys_prompt=one_sys, user=compact_user, temp=0.25, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"oneclick-raw"),
+                # 0) НОВОЕ: мягкий KV-формат — не просим JSON вообще, парсим сами.
+                #    Ставим первым, потому что для i1-IQ2_XS Dirty-Muse это
+                #    надёжнее любого JSON. Тип 'kv' обрабатывается отдельно.
+                dict(kind=u"kv", sys_prompt=kv_sys, user=kv_user, temp=0.55, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"oneclick-kv"),
+                # 1) строгая JSON-схема со steps + format=json (для моделей, что умеют)
+                dict(kind=u"json", sys_prompt=one_sys, user=compact_user, temp=0.25, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=True,  label=u"oneclick-json"),
+                # 2) та же схема без format=json (некоторые GGUF при format=json дают пусто)
+                dict(kind=u"json", sys_prompt=one_sys, user=compact_user + u" Return raw JSON object only.", temp=0.2, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"oneclick-raw"),
+                # 3) упрощённая плоская схема без 'steps' — normalize её теперь заворачивает сам
+                dict(kind=u"json", sys_prompt=one_sys_flat, user=compact_user, temp=0.3, max_tokens=AI_FULL_QUEST_MAX_TOKENS, force_json_format=False, label=u"oneclick-flat"),
             ]
 
         last_err = u""
@@ -2161,6 +4143,65 @@ Guidelines:
             except Exception:
                 pass
             try:
+                att_kind = att.get('kind', u'json')
+                if att_kind == u"kv":
+                    # МЯГКИЙ КV-ПУТЬ: получаем сырой текст, а НЕ JSON.
+                    raw_kv = ai_call(
+                        OLLAMA_MODEL_JSON,
+                        att['sys_prompt'],
+                        att['user'],
+                        want_json=False,                       # <-- ключевое: без format=json
+                        temp=att['temp'],
+                        max_tokens=att['max_tokens'],
+                        task_desc=u"Цепочка квестов (%s)" % att['label'],
+                        timeout=AI_FULL_QUEST_TIMEOUT,
+                        force_json_format=False,
+                    )
+                    # сохраняем сырой ответ в ИЗОЛИРОВАННУЮ квестовую переменную
+                    # СРАЗУ (даже для __ERROR-строки), чтобы фоновые SMS/NPC-чаты
+                    # не перетёрли то, что реально пришло в ответ на квест.
+                    try:
+                        store.ai_debug_last_quest_raw = u"[%s KV-RAW]\n" % att['label'] + ai_to_text(raw_kv, u"")
+                    except Exception:
+                        pass
+                    if isinstance(raw_kv, basestring) and raw_kv.startswith("__ERROR"):
+                        last_err = raw_kv
+                        ai_set_event_debug(u"Full quest KV attempt failed: %s -> %s" % (att['label'], raw_kv), raw=store.ai_debug_last_quest_raw)
+                        continue
+                    # дублируем и в общую (для совместимости с прочими просмотрами)
+                    try:
+                        store.ai_debug_last_json_raw = store.ai_debug_last_quest_raw
+                    except Exception:
+                        pass
+                    parsed_kv = ai_parse_kv_quest(raw_kv)
+                    if parsed_kv is None:
+                        last_err = u"kv-parse produced nothing for %s" % att['label']
+                        ai_set_event_debug(u"Full quest KV parse fail: %s" % last_err, raw=ai_to_text(raw_kv, u""))
+                        continue
+                    tree = ai_normalize_quest_tree(parsed_kv)
+                    min_ok_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
+                    if tree and len(tree.get('steps', [])) >= min_ok_steps:
+                        # Проверка на пресность: если у ЛЮБОГО выбора нет
+                        # ничего кроме confidence/mood — идём на следующую
+                        # попытку (последний attempt всё равно вернём как
+                        # есть, лучше пресный LLM, чем локальный шаблон).
+                        _meaningful = ai_quest_has_meaningful_choices(tree)
+                        _is_last = (i == len(attempts) - 1)
+                        if _meaningful or _is_last:
+                            ai_set_event_debug(
+                                u"Full quest tree OK via KV %s (%s steps, meaningful=%s)" % (att['label'], len(tree.get('steps', [])), _meaningful),
+                                raw=ai_to_text(raw_kv, u""),
+                                parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False, "kv_soft_format": True, "meaningful_choices": _meaningful},
+                            )
+                            return tree
+                        last_err = u"kv-tree TRIVIAL choices for %s (only confidence/mood), retrying" % att['label']
+                        ai_set_event_debug(u"Full quest KV rejected (trivial choices): %s" % last_err, raw=ai_to_text(raw_kv, u""), parsed=parsed_kv)
+                        continue
+                    last_err = u"kv-normalize failed or <%s steps for %s" % (min_ok_steps, att['label'])
+                    ai_set_event_debug(u"Full quest KV normalize fail: %s" % last_err, raw=ai_to_text(raw_kv, u""), parsed=parsed_kv)
+                    continue
+
+                # ==== JSON-ПУТЬ ====
                 data = ai_call(
                     OLLAMA_MODEL_JSON,
                     att['sys_prompt'],
@@ -2172,9 +4213,17 @@ Guidelines:
                     timeout=AI_FULL_QUEST_TIMEOUT,
                     force_json_format=att['force_json_format'],
                 )
+                # СРАЗУ фиксируем сырой ответ именно для КВЕСТА в изолированный
+                # слот. ai_debug_last_json_raw мог быть перезаписан фоновыми
+                # SMS/NPC-чатами между return из ai_call и нашим ai_set_event_debug.
+                try:
+                    _quest_raw_now = getattr(store, 'ai_debug_last_json_raw', u"") or u""
+                    store.ai_debug_last_quest_raw = u"[%s JSON-RAW]\n%s" % (att['label'], _quest_raw_now)
+                except Exception:
+                    pass
                 if isinstance(data, basestring) and data.startswith("__ERROR"):
                     last_err = data
-                    ai_set_event_debug(u"Full quest attempt failed: %s -> %s" % (att['label'], data), raw=getattr(store, 'ai_debug_last_json_raw', u''))
+                    ai_set_event_debug(u"Full quest attempt failed: %s -> %s" % (att['label'], data), raw=getattr(store, 'ai_debug_last_quest_raw', u''))
                     # HTTP 500 значит Ollama/модель уже упала. Не добиваем сервер ещё 1-2 запросами,
                     # сразу используем локальный 2x2 fallback и даём Ollama остыть/перезапуститься.
                     if data.startswith("__ERROR_OLLAMA_500__"):
@@ -2193,31 +4242,48 @@ Guidelines:
                         )
                         if isinstance(safe_data, basestring) and safe_data.startswith("__ERROR"):
                             last_err = data + u" | CPU-safe retry: " + ai_to_text(safe_data, u'')
-                            ai_set_event_debug(u"Full quest CPU-safe retry failed after HTTP 500: %s" % last_err, raw=getattr(store, 'ai_debug_last_json_raw', u''))
+                            ai_set_event_debug(u"Full quest CPU-safe retry failed after HTTP 500: %s" % last_err, raw=getattr(store, 'ai_debug_last_quest_raw', u''))
                             break
                         safe_tree = ai_normalize_quest_tree(safe_data)
                         min_ok_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
                         if safe_tree and len(safe_tree.get('steps', [])) >= min_ok_steps:
+                            # После CPU-safe retry всё равно принимаем: это
+                            # уже аварийный путь, второго шанса не будет.
+                            _meaningful_safe = ai_quest_has_meaningful_choices(safe_tree)
                             ai_set_event_debug(
-                                u"Full quest tree OK via CPU-safe retry after HTTP 500 (%s steps)" % len(safe_tree.get('steps', [])),
-                                raw=getattr(store, 'ai_debug_last_json_raw', u''),
-                                parsed={"title": safe_tree.get('title'), "steps": [s.get('id') for s in safe_tree.get('steps', [])], "local": False, "cpu_safe_retry": True},
+                                u"Full quest tree OK via CPU-safe retry after HTTP 500 (%s steps, meaningful=%s)" % (len(safe_tree.get('steps', [])), _meaningful_safe),
+                                raw=getattr(store, 'ai_debug_last_quest_raw', u''),
+                                parsed={"title": safe_tree.get('title'), "steps": [s.get('id') for s in safe_tree.get('steps', [])], "local": False, "cpu_safe_retry": True, "meaningful_choices": _meaningful_safe},
                             )
                             return safe_tree
                         last_err = data + u" | CPU-safe retry normalize failed"
-                        ai_set_event_debug(u"Full quest CPU-safe retry normalize fail: %s" % last_err, raw=getattr(store, 'ai_debug_last_json_raw', u''), parsed=safe_data)
+                        ai_set_event_debug(u"Full quest CPU-safe retry normalize fail: %s" % last_err, raw=getattr(store, 'ai_debug_last_quest_raw', u''), parsed=safe_data)
                         break
                     continue
                 tree = ai_normalize_quest_tree(data)
                 min_ok_steps = 1 if AI_QUEST_ONE_STEP_TEST_MODE else 2
                 if tree and len(tree.get('steps', [])) >= min_ok_steps:
-                    ai_set_event_debug(
-                        u"Full quest tree OK via %s (%s steps)" % (att['label'], len(tree.get('steps', []))),
-                        parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False, "one_step_test": bool(AI_QUEST_ONE_STEP_TEST_MODE)},
-                    )
-                    return tree
+                    _meaningful = ai_quest_has_meaningful_choices(tree)
+                    _is_last = (i == len(attempts) - 1)
+                    if _meaningful or _is_last:
+                        ai_set_event_debug(
+                            u"Full quest tree OK via %s (%s steps, meaningful=%s)" % (att['label'], len(tree.get('steps', [])), _meaningful),
+                            parsed={"title": tree.get('title'), "steps": [s.get('id') for s in tree.get('steps', [])], "local": False, "one_step_test": bool(AI_QUEST_ONE_STEP_TEST_MODE), "meaningful_choices": _meaningful},
+                        )
+                        return tree
+                    last_err = u"json-tree TRIVIAL choices for %s (only confidence/mood), retrying" % att['label']
+                    ai_set_event_debug(u"Full quest rejected (trivial choices): %s" % last_err, parsed=data)
+                    continue
                 last_err = u"normalize failed or <%s steps for %s" % (min_ok_steps, att['label'])
-                ai_set_event_debug(u"Full quest normalize fail: %s" % last_err, parsed=data)
+                # parsed=data — то, что реально вернул json.loads(); часто именно
+                # тут видно, что модель прислала пустой {} или список без 'steps'
+                # и без 'choices'. raw= — сырой ответ конкретно этой квестовой
+                # попытки, не перезаписанный фоновыми SMS/NPC.
+                ai_set_event_debug(
+                    u"Full quest normalize fail: %s" % last_err,
+                    raw=getattr(store, 'ai_debug_last_quest_raw', u''),
+                    parsed=data,
+                )
             except Exception as e:
                 last_err = unicode(e)
                 print("full quest attempt err %s: %s" % (att['label'], e))
@@ -2240,10 +4306,59 @@ Guidelines:
             pass
         return tree
 
+    def generate_next_quest_step(prev_full_q, prev_step, chosen_choice, step_no):
+        """ON-DEMAND CHAIN: генерирует СЛЕДУЮЩИЙ шаг квеста, зная предыдущий
+        шаг + выбранный игроком вариант. Возвращает новый step-dict, либо
+        None если LLM не осилила. Вызывается когда игрок выбирает choice
+        без is_ending=true.
+
+        step_no — номер СЛЕДУЮЩЕГО шага (2, 3, ..). Если == AI_QUEST_MAX_STEPS,
+        передаём модели указание, что это последний шаг и все choices должны
+        быть is_ending=true.
+        """
+        try:
+            gs = get_state()
+            # Пробрасываем контекст цепочки в build_char_context. Простые
+            # gs-ключи с префиксом _chain — читаются в task-блоке
+            # generate_full_quest.
+            try:
+                gs['_chain_step_no'] = int(step_no)
+            except Exception:
+                gs['_chain_step_no'] = 2
+            gs['_chain_prev_scene'] = ai_to_text(prev_step.get('description', u''), u'')[:400] if ai_dict_like(prev_step) else u''
+            gs['_chain_prev_choice'] = ai_to_text(chosen_choice.get('text', u''), u'') if ai_dict_like(chosen_choice) else u''
+            # Прошлые аллаудед-теги перенесём как есть, чтобы модель осталась
+            # в той же теме.
+            for k in ('allowed_tags', 'spicy_level', 'is_spicy'):
+                if k not in gs and prev_full_q and prev_full_q.get(k) is not None:
+                    gs[k] = prev_full_q.get(k)
+
+            # Собираем single-step дерево тем же generate_full_quest.
+            # Он же вернёт tree со STEPS[0] — это и есть новый шаг.
+            new_tree = generate_full_quest(gs)
+            if not ai_dict_like(new_tree) or not new_tree.get('steps'):
+                return None
+            new_step = new_tree['steps'][0]
+            # Даём ему уникальный id, чтобы не столкнуться с существующим.
+            new_step['id'] = u"step%d" % int(step_no)
+            # Если это последний шаг — форсируем is_ending=true на всех выборах.
+            if int(step_no) >= AI_QUEST_MAX_STEPS:
+                for ch in new_step.get('choices', []) or []:
+                    if ai_dict_like(ch):
+                        ch['is_ending'] = True
+                        ch['next_step'] = None
+            return new_step
+        except Exception as e:
+            print("generate_next_quest_step err: %s" % e)
+            return None
+
     def generate_full_dialogue(npc, gs):
         try:
-            npc_info="%s %s group=%s whore=%s slut=%s" % (npc.fname, npc.sname, getattr(npc,'bio_group','?'), getattr(npc,'iswhore',False), getattr(npc,'isslut',False))
-            prompt="Full dialogue with %s, fem=%s%%, conf=%s, location=%s, outfit=%s" % (npc_info, gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''))
+            npc_info=u"%s %s group=%s whore=%s slut=%s" % (npc.fname, npc.sname, getattr(npc,'bio_group','?'), getattr(npc,'iswhore',False), getattr(npc,'isslut',False))
+            task = (u"Generate a full 4-exchange dialogue between the NPC (%s) and Samantha "
+                    u"as described by the schema in the system prompt. Base every line on the "
+                    u"WORLD STATE above — reference her current outfit/mood/location if relevant." % npc_info)
+            prompt = ai_prefix_world_state(task, gs, mode=u"full")
             # Использование безопасного .format() во избежание упавших аргументов % в Python 2!
             sys_prompt=PROMPTS["npc_full"].format(fname=npc.fname, sname=npc.sname, bio_group=getattr(npc,'bio_group','?'), iswhore=getattr(npc,'iswhore',False), fem=gs['fem'])
             data=ai_call(OLLAMA_MODEL_JSON, sys_prompt, prompt, want_json=True, temp=0.85, max_tokens=800, task_desc=u"Полный диалог с " + npc.fname)
@@ -2255,7 +4370,10 @@ Guidelines:
 
     def generate_dirty_batch(gs, sex_type="vag", npc_name="partner"):
         try:
-            prompt="Dirty talk batch for %s stage full, fem %s%%, desire %s%%, NPC %s" % (sex_type, gs['fem'], gs['desire'], npc_name)
+            task = (u"Generate 5 dirty-talk phrases Samantha would say/think during %s sex with %s, "
+                    u"progressing from foreplay to climax. Match her current arousal/femininity from "
+                    u"the WORLD STATE above." % (sex_type, npc_name))
+            prompt = ai_prefix_world_state(task, gs, mode=u"minimal")
             sys_prompt=PROMPTS["dirty_batch"] % {'sex_type': sex_type, 'npc_name': npc_name, 'fem': gs['fem'], 'desire': gs['desire']}
             data=ai_call(OLLAMA_MODEL_JSON, sys_prompt, prompt, want_json=True, temp=0.9, max_tokens=500, task_desc=u"Интимный монолог")
             if data and isinstance(data, list) and len(data)>=2:
@@ -2266,7 +4384,9 @@ Guidelines:
 
     def generate_sms_batch(gs):
         try:
-            prompt="Generate 3 SMS for fem=%s%% loc=%s outfit=%s" % (gs['fem'], gs['location'], gs.get('outfit',''))
+            task = (u"Generate 3 SMS from different NPCs to Samantha as the system-prompt JSON array. "
+                    u"Reference her current outfit / location / recent actions from the WORLD STATE above.")
+            prompt = ai_prefix_world_state(task, gs, mode=u"compact")
             data=ai_call(OLLAMA_MODEL_JSON, PROMPTS["sms_batch"], prompt, want_json=True, temp=0.85, max_tokens=600, task_desc=u"SMS рассылка")
             if data and isinstance(data, list):
                 return data
@@ -2276,7 +4396,9 @@ Guidelines:
 
     def generate_diary_batch(gs):
         try:
-            prompt="Diary batch for next 3 days, fem=%s%%, last_event=%s" % (gs['fem'], gs.get('last_event','none'))
+            task = (u"Generate 3 diary entries for the next 3 days as the system-prompt JSON array. "
+                    u"Base tone/topics on the WORLD STATE above and Samantha's previous event.")
+            prompt = ai_prefix_world_state(task, gs, mode=u"compact")
             data=ai_call(OLLAMA_MODEL_JSON, PROMPTS["diary_batch"], prompt, want_json=True, temp=0.8, max_tokens=600, task_desc=u"Дневниковые записи")
             if data and isinstance(data, list):
                 return data
@@ -2288,7 +4410,7 @@ Guidelines:
 
 [КТО ТЫ]
 - Ты женщина 32 года, доминантная госпожа, строгая кураторша. Контролируешь Саманту.
-- Саманта - бывший мужик в теле девушки, феминность %d%%. Ты ее дрессируешь.
+- Саманта - бывший мужик в теле девушки, принятие себя как девушки %d%%. Ты ее дрессируешь.
 - Ты ПРИКАЗЫВАЕШЬ, не спрашиваешь.
 - Ты не ИИ, ты Брукер.
 
@@ -2300,7 +4422,7 @@ Guidelines:
 - Максимум NSFW про пизду, сиськи, клитор.
 
 [ТЕГИ В КОНЦЕ ОБЯЗАТЕЛЬНО]
-[FEMININITY+3][CONFIDENCE+2][HORNY+4] и т.д.
+[ACCEPT+3][CONFIDENCE+2][HORNY+4] и т.д. (совместимость: [FEMININITY+N] тоже пойдёт как [ACCEPT+N])
 
 Пиши только на русском, доминантно, пошло, коротко.
 """,
@@ -2308,21 +4430,22 @@ Guidelines:
 
 [WHO YOU ARE]
 - You are 32yo dominant mistress, strict handler. You control Samantha.
-- Samantha is former man in female body, femininity %d%%. You train her.
+- Samantha is former man in female body, self-acceptance %d%%. You train her.
 - You ORDER, not ask. Tell her what to do with body.
 - You are not AI, you are Brooker.
 
 [DOMINANT STYLE]
 - Call her: girl, baby girl, slut, good girl, whore.
 - Command: Spread your legs, Show me, Touch yourself, Report, Don't you dare cum without permission.
-- Punish disobedience, praise femininity.
+- Punish disobedience, praise her accepting the female body.
 - 1-3 short sentences, mistress chat style.
 - No *stars*.
 - Maximum NSFW, explicit about pussy, tits, clit, ovulation.
 - Watch her body via Institute cameras.
 
 [TAGS AT END MANDATORY]
-At end of every message 1-3 tags: [FEMININITY+3][CONFIDENCE+2][HORNY+4] etc.
+At end of every message 1-3 tags: [ACCEPT+3][CONFIDENCE+2][HORNY+4] etc.
+Note: legacy tag [FEMININITY+N] is accepted too and treated as [ACCEPT+N].
 
 [EXAMPLES DOMINANT]:
 User: Teach me how to masturbate, only used to dick
@@ -2334,7 +4457,7 @@ Write only in English, dominant, dirty, short, commanding.
 
 [WHO YOU ARE]
 - You are 32yo dominant mistress, strict handler. You control Samantha.
-- Samantha is former man in female body, femininity %d%%. You train her.
+- Samantha is former man in female body, self-acceptance %d%%. You train her.
 - You ORDER, not ask.
 - You are not AI, you are Brooker.
 
@@ -2346,7 +4469,7 @@ Write only in English, dominant, dirty, short, commanding.
 - Maximum NSFW, explicit about pussy, tits, clit, ovulation.
 
 [TAGS AT END MANDATORY]
-[FEMININITY+3][CONFIDENCE+2][HORNY+4] etc.
+[ACCEPT+3][CONFIDENCE+2][HORNY+4] etc. (legacy [FEMININITY+N] also accepted)
 
 Write only in English, dominant, dirty, short, commanding.
 """,
@@ -2366,14 +4489,14 @@ Rules:
 - Make NPCs react to active perks/traits if relevant.
 Only JSON.
 """,
-        "npc_chat": u"""You are NPC in TheFixer. Roleplay as given NPC. Know Samantha is former man, femininity %d%%. Speak as NPC would. Keep memory of past talks. English, short. At end add tag [FEMININITY+1] etc.
+        "npc_chat": u"""You are NPC in TheFixer. Roleplay as given NPC. Know Samantha is former man, self-acceptance-as-a-girl %d%%. Speak as NPC would. Keep memory of past talks. English, short. At end add tag [ACCEPT+1] etc. (legacy [FEMININITY+1] also accepted).
 SPECIAL RULE: If you want to invite Samantha to meet up, give her a task/quest, or trigger a 3D gameplay event with her, append the tag [EVENT] at the very end of your response.
 """,
-        "dirty": "You are TheFixer dirty talk generator during sex. Player Samantha former man, now female body, femininity %d%%, type %s with %s. Generate 1-2 short dirty phrases she would say/think in English, mixing male past and female present. NSFW explicit. No tags.",
-        "diary": "You are Samantha's diary writer. Write 2-3 sentence diary entry in English, first person, about today event: %s. Focus on femininity %d%%, male past vs female present, clothes %s. Intimate style.",
-        "report": "You are Institute report generator. Write short report in English, scientific, about Subject S-0 Samantha, former man, femininity %d%%, confidence %d, corrupt %d, location %s. Include recommendation for femininity training. 3-4 sentences.",
+        "dirty": "You are TheFixer dirty talk generator during sex. Player Samantha former man, now female body, self-acceptance %d%%, type %s with %s. Generate 1-2 short dirty phrases she would say/think in English, mixing male past and female present. NSFW explicit. No tags.",
+        "diary": "You are Samantha's diary writer. Write 2-3 sentence diary entry in English, first person, about today event: %s. Focus on self-acceptance %d%%, male past vs female present, clothes %s. Intimate style.",
+        "report": "You are Institute report generator. Write short report in English, scientific, about Subject S-0 Samantha, former man, self-acceptance %d%%, confidence %d, corrupt %d, location %s. Include recommendation for further training. 3-4 sentences.",
         "shop_item": "Generate new sexy clothing item for TheFixer shop as JSON: {name:\"\", desc:\"\", type:\"top/bottom/outfit\", slutty:bool, skirt:bool, clevage:bool, value:int, outfit:[\"daily\",\"party\"]}. Name English caps, desc English. Only JSON.",
-        "training": "You are femininity coach for former man in female body. Player fem %d%%, fitness %d. Give 2-3 sentence training advice in English for %s (fitness/int/confidence). Include small task. Encouraging, slightly teasing, dominant.",
+        "training": "You are femininity coach for former man in female body. Player self-acceptance %d%%, fitness %d. Give 2-3 sentence training advice in English for %s (fitness/int/confidence). Include small task. Encouraging, slightly teasing, dominant.",
         "sms": """You are SMS Generator for TheFixer characters. Generate short, realistic, character-appropriate SMS to Samantha.
 RULES:
 - 1-2 sentences.
@@ -2383,7 +4506,7 @@ RULES:
 - ONLY use keyboard text smileys (like :), ;), :P, :D, <3, XD).
 - Write in English.
 """,
-        "perk": "Generate new perk for TheFixer based on femininity %d%% and actions %s. JSON: {name:\"\", desc:\"\", type:\"confidence/desire/allure\", add:5, multi:1.2}. Name English, desc English. Only JSON.",
+        "perk": "Generate new perk for TheFixer based on self-acceptance %d%% and actions %s. JSON: {name:\"\", desc:\"\", type:\"confidence/desire/allure\", add:5, multi:1.2}. Name English, desc English. Only JSON.",
 
         "event_full_compact": """You are TheFixer ONE-STEP quest JSON generator.
 Return ONLY one JSON object. No markdown.
@@ -2485,8 +4608,12 @@ default ai_time_event_chance = 10          # Нарастающий ежечас
 
 # RECENT GG ACTIONS TRACKING (Трекинг действий Саманты для контекста ИИ)
 default ai_recent_actions = []             # Список последних 8 действий Sammy
+default ai_recent_locations = []           # Список последних 6 локаций Sammy (для контекста квестов)
+default ai_pending_travel = None           # Если LLM вернул effects.travel_to — сюда кладётся loc_obj, реально переносим ПОСЛЕ закрытия UI квеста.
+default ai_chain_pending = False           # True пока фоновый поток генерирует следующий step цепочки. Loading screen ждёт.
 default ai_debug_last_event_reason = ""
 default ai_debug_last_json_raw = ""
+default ai_debug_last_quest_raw = ""  # изолированный сырой ответ ПОСЛЕДНЕГО квестового ai_call (KV или JSON). Не перезаписывается фоновыми SMS/NPC-чатами.
 default ai_event_ui_cache = None
 default ai_event_title = "Событие"
 default ai_event_desc = "..."
@@ -2516,7 +4643,7 @@ screen ai_chat_screen():
                 hbox:
                     xfill True
                     spacing 8
-                    text "Dr. Brooker | Фем [ai_fem]%" size 14 bold True color "#aaddff"
+                    text "Dr. Brooker | Принятие [ai_accept]%" size 14 bold True color "#aaddff"
                     textbutton "ЯЗЫК: [ai_chat_lang]" action If(ai_chat_lang=="ru", true=SetVariable("ai_chat_lang","en"), false=SetVariable("ai_chat_lang","ru")) background "#1a2a5a" hover_background "#2a4a8a" text_size 12 tooltip "Переключить язык следующего ответа RU/EN"
                     textbutton "X" action Return() xalign 1.0
             frame:
@@ -2610,7 +4737,9 @@ label ai_chat_poll:
                 for stat, d in re.findall(r'\[([A-Z_]+)([+-]\d+)\]', data):
                     try:
                         delta=int(d)
-                        if stat=="FEMININITY": ai_fem=max(0,min(100,ai_fem+delta))
+                        if stat in ("FEMININITY","ACCEPT","ACCEPTANCE"):
+                            ai_accept = max(0, min(100, ai_accept + delta))
+                            ai_fem = ai_accept  # alias
                         elif stat=="CONFIDENCE" and hasattr(player,'_confidence'): player._confidence=max(0,min(100,player._confidence+delta))
                         elif stat=="CORRUPTION" and hasattr(player,'corrupt'): player.corrupt=max(0,player.corrupt+delta)
                     except: pass
@@ -2718,7 +4847,12 @@ label ai_gen_event:
                         store.ai_pending_event = evt
                     except Exception as e:
                         ai_set_event_debug(u"Emergency local tree failed: %s; falling back to single event" % e)
-                        prompt = "fem=%s%% conf=%s loc=%s outfit=%s perks=%s hour=%s timeofday=%s spicy_level=%s/10 is_spicy=%s allowed_tags=%s inventory=%s quests=%s. Generate ONE short grounded event with 2-3 choices only. Keep description concise. JSON." % (gs['fem'], gs['confidence'], gs['location'], gs.get('outfit',''), gs.get('perks',''), gs['hour'], gs['timeofday'], spicy_level, is_spicy, allowed_tags_str, gs.get('inventory',''), gs.get('active_quests',''))
+                        task = (u"Generate ONE short grounded event with 2-3 choices based on the "
+                                u"WORLD STATE above. Keep description concise. Reference the "
+                                u"current outfit / location / at least one active perk if relevant. "
+                                u"Stay strictly inside allowed themes: %s. spicy_level=%s. Only JSON."
+                                % (allowed_tags_str, spicy_level))
+                        prompt = ai_prefix_world_state(task, gs, mode=u"full")
                         evt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.35, max_tokens=AI_EVENT_MAX_TOKENS, task_desc=u"Событие для " + gs.get('location','home'))
                         if evt == "__ERROR_MODEL_NOT_FOUND__":
                             ai_set_event_debug(u"Model not found for event generation")
@@ -2737,14 +4871,14 @@ label ai_gen_event:
                                 store.ai_full_quest_data = full_q
                                 evt = ai_step_to_event(full_q, full_q['steps'][0], spicy_level=spicy_level)
                             except Exception:
-                                evt = {"title":"Challenge","description":"You face a small femininity challenge at %s. Fem %s%%." % (gs.get('location','home'), gs.get('fem',25)),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train femininity"},"is_quest":True,"tags":["femininity"],"choices":[{"text":"Accept","effects":{"femininity":3}},{"text":"Refuse","effects":{"confidence":1}}]}
+                                evt = {"title":"Challenge","description":"You face a small self-acceptance challenge at %s. Self-acceptance %s%%." % (gs.get('location','home'), gs.get('accept',20)),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"],"reason":"Train self-acceptance as a girl"},"is_quest":True,"tags":["femininity"],"choices":[{"text":"Accept","effects":{"acceptance":3}},{"text":"Refuse","effects":{"confidence":1}}]}
                         else:
                             ai_set_event_debug(u"Event parsed successfully", parsed=evt)
                         evt = ai_normalize_event(evt)
                         if ai_dict_like(evt) and 'choices' in evt:
                             if not ai_filter_event_by_comfort(evt):
                                 ai_set_event_debug(u"Event was blocked by comfort/location filter", parsed=evt)
-                                evt = {"title":"Morning","description":"Wonderful day, fem %s%%. Try new outfit." % gs['fem'],"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"]},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear","effects":{"femininity":3}}]}
+                                evt = {"title":"Morning","description":"Wonderful day, self-acceptance %s%%. Try new outfit." % gs.get('accept', 20),"type":"femininity","outfit_suggestion":{"items":["item_top_22","item_bottom_15"]},"is_quest":False,"tags":["femininity"],"choices":[{"text":"Wear","effects":{"acceptance":3}}]}
                                 evt = ai_normalize_event(evt)
                         store.ai_pending_event = evt
 
@@ -2958,11 +5092,11 @@ screen ai_event_screen(evt_obj=None):
                         else:
                             vbox:
                                 xalign 0.5 yalign 0.5
-                                text "Саманта [ai_fem]%" xalign 0.5 color "#ff88cc"
+                                text "Саманта [ai_accept]%" xalign 0.5 color "#ff88cc"
                     frame:
                         background "#1a1a2a" xfill True ysize 80
                         vbox:
-                            text "Фем:[ai_fem]% Corr:[_ui_corrupt]" size 11 color "#aaa"
+                            text "Принятие:[ai_accept]% Corr:[_ui_corrupt]" size 11 color "#aaa"
                             text "Надето: [_ui_outfit]" size 10 color "#ffaa44"
             frame:
                 xsize 470 yfill True background "#12121a"
@@ -2972,29 +5106,30 @@ screen ai_event_screen(evt_obj=None):
                         background "#2a1a3a" xfill True ysize 60
                         vbox:
                             text "[_ui_title]" size 18 bold True color "#ff88cc"
+                    # Текст сцены: гибкая высота, но НЕ больше, чем половина
+                    # экрана. Кнопки блока choices ниже получат гарантированную
+                    # свою часть, а не будут выдавлены за нижний край.
                     frame:
-                        background "#1a1a2a" xfill True yfill True
-                        viewport:
-                            scrollbars "vertical" mousewheel True
-                            vbox:
-                                text "[_ui_desc]" size 16 color "#e0e0ff"
-                                if _ui_is_quest:
-                                    frame:
-                                        background "#0a2a0a"
-                                        vbox:
-                                            text "Квест: [_ui_qtitle]" size 12 color "#88ff88"
-                                            text "[_ui_qdesc]" size 12 color "#88ff88"
-                    frame:
-                        background "#0f0f1a" xfill True ysize 340
+                        background "#1a1a2a" xfill True
+                        ymaximum 550
                         viewport:
                             scrollbars "vertical" mousewheel True draggable True
-                            yinitial 1.0
+                            vbox:
+                                text "[_ui_desc]" size 16 color "#e0e0ff"
+                    # Блок выборов: фиксированная высота с запасом под 6 кнопок
+                    # (5 персон + Пропустить). Скролл сверху вниз (yinitial 0.0
+                    # и убран yalign 1.0), чтобы верхние варианты были видны
+                    # сразу, а не уезжали за нижний край экрана.
+                    frame:
+                        background "#0f0f1a" xfill True ysize 320
+                        viewport:
+                            scrollbars "vertical" mousewheel True draggable True
+                            yinitial 0.0
                             vbox:
                                 xfill True
-                                spacing 8
-                                yalign 1.0
+                                spacing 6
                                 if _ui_choices:
-                                    for idx, ch in enumerate(_ui_choices[:2] if _ui_is_quest else _ui_choices[:3]):
+                                    for idx, ch in enumerate(_ui_choices[:5] if _ui_is_quest else _ui_choices[:3]):
                                         python:
                                             _choice_txt = u"..."
                                             try:
@@ -3111,9 +5246,84 @@ label ai_event_choice:
                                 print("Full quest next_step id not found: %s -> force ending" % next_step_id)
                                 ending_evt = ai_build_quest_ending_event(full_q, ch, _cur_evt)
                         else:
-                            # Терминальный выбор ветки -> экран итога с наградами
-                            print("Full quest terminal choice -> building ending screen")
-                            ending_evt = ai_build_quest_ending_event(full_q, ch, _cur_evt)
+                            # next_step отсутствует. Раньше это автоматически
+                            # означало финал ветки. Теперь: смотрим is_ending.
+                            # Если модель ЯВНО поставила is_ending=true — это
+                            # действительно финал. Иначе — on-demand chain:
+                            # генерируем следующий шаг через новый ai_call.
+                            explicit_end = bool(ai_dict_like(ch) and ch.get('is_ending'))
+                            steps_so_far = len(full_q.get('steps', []) or [])
+                            hit_cap = steps_so_far >= AI_QUEST_MAX_STEPS
+
+                            if explicit_end or hit_cap:
+                                reason = u"explicit is_ending" if explicit_end else (
+                                    u"hit AI_QUEST_MAX_STEPS=%d" % AI_QUEST_MAX_STEPS)
+                                print("Full quest ends (%s) -> summary screen" % reason)
+                                ending_evt = ai_build_quest_ending_event(full_q, ch, _cur_evt)
+                            else:
+                                # ON-DEMAND CHAIN: генерируем СЛЕДУЮЩИЙ шаг
+                                # В ФОНОВОМ ПОТОКЕ, чтобы UI не фризил на
+                                # 10-30 секунд ai_call'а. Показываем loading
+                                # screen, который poll'ит store.ai_pending_event.
+                                cur_step_data = None
+                                try:
+                                    cur_id = getattr(store, 'ai_full_quest_current_step', 'step1')
+                                    for _s in full_q.get('steps', []):
+                                        if ai_dict_like(_s) and _s.get('id') == cur_id:
+                                            cur_step_data = _s; break
+                                except Exception:
+                                    pass
+                                next_step_no = steps_so_far + 1
+
+                                # Флаг: продолжение готовится в фоне.
+                                store.ai_chain_pending = True
+                                store.ai_pending_event = None
+                                store.ai_event_thinking = True
+                                try:
+                                    store.ai_notify_queue.append(u"ИИ: продолжаю квест...")
+                                except Exception:
+                                    pass
+
+                                def _chain_worker(_full_q=full_q, _cur=cur_step_data, _ch=ch, _n=next_step_no, _fallback=(_cur_evt, ch)):
+                                    try:
+                                        new_step = generate_next_quest_step(_full_q, _cur, _ch, _n)
+                                        if ai_dict_like(new_step):
+                                            _full_q.setdefault('steps', []).append(new_step)
+                                            store.ai_full_quest_data = _full_q
+                                            store.ai_full_quest_current_step = new_step.get('id')
+                                            staged = ai_step_to_event(
+                                                _full_q, new_step,
+                                                spicy_level=getattr(store, 'ai_spicy_meter', 2)
+                                            )
+                                            store.ai_pending_event = staged
+                                            print("Chain quest advanced to step %d (%s)" % (_n, new_step.get('id')))
+                                        else:
+                                            # Не смогли сгенерить продолжение — покажем ending
+                                            print("Chain quest could not generate step %d -> summary" % _n)
+                                            _fev = _fallback[0]
+                                            _fch = _fallback[1]
+                                            store.ai_pending_event = ai_build_quest_ending_event(_full_q, _fch, _fev)
+                                    except Exception as _we:
+                                        print("chain worker err: %s" % _we)
+                                        try:
+                                            store.ai_pending_event = ai_build_quest_ending_event(
+                                                _full_q, _fallback[1], _fallback[0]
+                                            )
+                                        except Exception:
+                                            pass
+                                    finally:
+                                        store.ai_event_thinking = False
+                                        store.ai_chain_pending = False
+                                        try:
+                                            renpy.restart_interaction()
+                                        except Exception:
+                                            pass
+
+                                import threading
+                                threading.Thread(target=_chain_worker).start()
+                                # ВАЖНО: не выставляем next_evt/ending_evt здесь.
+                                # Флаг _chain_pending заставит label'ы ниже
+                                # уйти на loading screen и ждать ai_pending_event.
                 except Exception as e:
                     print("Full quest next step err %s" % e)
 
@@ -3155,7 +5365,7 @@ label ai_event_choice:
                             def _prefetch_next_level(idx, txt):
                                 try:
                                     gs = get_state()
-                                    cont = "Prev step: %s - %s. Chose: %s. Fem %s%%. Generate NEXT short JSON step. Keep it concise and valid JSON." % (next_evt.get('title', ''), next_evt.get('description', '')[:200], txt[:100], gs['fem'])
+                                    cont = "Prev step: %s - %s. Chose: %s. Self-acceptance %s%%. Generate NEXT short JSON step. Keep it concise and valid JSON." % (next_evt.get('title', ''), next_evt.get('description', '')[:200], txt[:100], gs.get('accept', 20))
                                     nxt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], cont, want_json=True, temp=0.82, max_tokens=AI_PREFETCH_MAX_TOKENS, task_desc=u"Разветвление уровня")
                                     if nxt and isinstance(nxt, dict) and not unicode(nxt.get('title', '')).startswith("__ERROR"):
                                         store.ai_prefetched[idx] = ai_normalize_event(nxt)
@@ -3190,9 +5400,32 @@ label ai_event_choice:
             print("choice handling err %s" % e)
             store._has_next = False
 
+    # ФОНОВАЯ ГЕНЕРАЦИЯ СЛЕДУЮЩЕГО ШАГА: показать loading screen и ждать.
+    # ai_chain_pending выставляется в _chain_worker выше. Loading screen
+    # каждые 0.5с делает Jump("ai_event_poll"), а тот в свою очередь
+    # ждёт ai_pending_event, стажит его в UI и джампает на ai_event_choice.
+    # Так мы никогда не блокируем главный поток на ai_call.
+    if getattr(store, 'ai_chain_pending', False):
+        $ store.ai_chain_pending = False
+        call screen ai_event_loading_screen
+
     if getattr(store, '_has_next', False):
         jump ai_event_choice
     else:
+        # ЭФФЕКТ 'travel_to': если выбор просил перекинуть Саманту куда-то —
+        # делаем это ЗДЕСЬ, когда UI-квест уже закрыт. Иначе travel_walk
+        # порвёт открытый экран квеста.
+        if getattr(store, 'ai_pending_travel', None) is not None:
+            python:
+                _dst = store.ai_pending_travel
+                store.ai_pending_travel = None
+                try:
+                    _tw = getattr(store, 'travel_walk', None)
+                    if _tw:
+                        _tw(_dst, arrival=True)
+                except Exception as _te:
+                    print("ai_pending_travel exec err: %s" % _te)
+            jump travel_arrival
         # Проверяем, было ли это автоматическое событие
         if getattr(store, '_automatic_event_active', False) or getattr(store, 'ai_current_automatic_event', None) is not None:
             $ store._automatic_event_active = False
@@ -3270,7 +5503,7 @@ screen ai_npc_chat_screen(npc, history):
                 background "#2a2a4a" xfill True ysize 50
                 hbox:
                     xfill True
-                    text "Чат с [npc.fname] [npc.sname] | Фем [ai_fem]%" size 14 color "#aaddff"
+                    text "Чат с [npc.fname] [npc.sname] | Принятие [ai_accept]%" size 14 color "#aaddff"
                     textbutton "X" action Return() xalign 1.0
             frame:
                 background "#0a0a12" xfill True yfill True
@@ -3356,8 +5589,10 @@ label ai_npc_chat_poll:
                 clean=re.sub(r'\[.*?\]','',resp).strip()
                 ai_npc_chats[npc_id].append({"role":"assistant","content":clean})
                 for stat,d in re.findall(r'\[([A-Z_]+)([+-]\d+)\]', resp):
-                    if stat=="FEMININITY":
-                        try: ai_fem=max(0,min(100,ai_fem+int(d)))
+                    if stat in ("FEMININITY","ACCEPT","ACCEPTANCE"):
+                        try:
+                            ai_accept = max(0, min(100, ai_accept + int(d)))
+                            ai_fem = ai_accept  # alias
                         except: pass
             
             store.ai_pending_npc_response = None
@@ -3379,7 +5614,11 @@ label ai_trigger_npc_event:
                 is_spicy, spicy_level, spicy_chance, spicy_roll = ai_get_spicy_prompt_modifier()
                 npc_profile = ai_get_npc_profile_prompt(triggered_npc)
                 
-                prompt = "Generate arrival event specifically involving NPC %s %s who has just invited Samantha. Current location of event is %s. Fem %s%%, outfit %s. Branching choices with effects. JSON." % (triggered_npc.fname, triggered_npc.sname, gs['location'], gs['fem'], gs['outfit'])
+                task = (u"Generate an ARRIVAL event specifically involving NPC %s %s who has just "
+                        u"invited Samantha. Ground the scene in the WORLD STATE above (current "
+                        u"outfit, mood, cycle, perks). Branching choices with effects. Only JSON."
+                        % (triggered_npc.fname, triggered_npc.sname))
+                prompt = ai_prefix_world_state(task, gs, mode=u"full")
                 sys_prompt = PROMPTS["event"] + "\nNPC PROFILE:\n" + npc_profile
                 
                 evt = ai_call(OLLAMA_MODEL_JSON, sys_prompt, prompt, want_json=True, temp=0.88, max_tokens=700, task_desc=u"Событие встречи с " + triggered_npc.fname)
@@ -3422,7 +5661,9 @@ label ai_dirty_talk(sex_type="vag", npc=None):
             gs=get_state()
             npc_name = "%s" % npc.fname if npc else "partner"
             sys_prompt=PROMPTS["dirty"] % (gs['fem'], sex_type, npc_name)
-            user_prompt="Sex type %s, fem %s%%, desire %s, NPC %s." % (sex_type, gs['fem'], gs['desire'], npc_name)
+            _dirty_task = (u"Give ONE more short dirty-talk phrase Samantha would say/think right "
+                           u"now during %s sex with %s. Match her state from the WORLD STATE above." % (sex_type, npc_name))
+            user_prompt = ai_prefix_world_state(_dirty_task, gs, mode=u"minimal")
             resp=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, user_prompt, want_json=False, temp=0.9, max_tokens=200, task_desc=u"Грязная фраза секса")
             if resp and not resp.startswith("__ERROR"):
                 ai_dirty_talk_history.append(resp)
@@ -3439,7 +5680,11 @@ label ai_diary_gen:
                 gs=get_state()
                 last_evt=ai_events[-1]['description'] if ai_events else "обычный день"
                 sys_prompt=PROMPTS["diary"] % (last_evt, gs['fem'], gs.get('outfit','unknown'))
-                entry=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, "Write diary entry fem %s%%" % gs['fem'], want_json=False, temp=0.8, max_tokens=300, task_desc=u"Запись в дневник")
+                _diary_task = (u"Write ONE 2-3 sentence diary entry from Samantha, first person, "
+                               u"about today. Ground it in the WORLD STATE above (outfit, cycle, "
+                               u"mood, previous event, active perks).")
+                _diary_user = ai_prefix_world_state(_diary_task, gs, mode=u"compact")
+                entry=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, _diary_user, want_json=False, temp=0.8, max_tokens=300, task_desc=u"Запись в дневник")
                 if entry and not entry.startswith("__ERROR"):
                     store.ai_diary_entries.append({"day":gs.get('day',0),"text":entry})
                     try:
@@ -3487,7 +5732,11 @@ label ai_report_gen:
             try:
                 gs=get_state()
                 sys_prompt=PROMPTS["report"] % (gs['fem'], gs['confidence'], gs['corrupt'], gs['location'])
-                user_prompt="fem %s%% conf %s corrupt %s loc %s perks %s" % (gs['fem'], gs['confidence'], gs['corrupt'], gs['location'], gs['perks'])
+                _report_task = (u"Write a short (3-4 sentences) Institute scientific report on Subject "
+                                u"S-0 (Samantha), based on the WORLD STATE above. Include a concrete "
+                                u"recommendation for her next femininity training step given her "
+                                u"active perks, cycle/pregnancy state and current outfit.")
+                user_prompt = ai_prefix_world_state(_report_task, gs, mode=u"full")
                 report=ai_call(OLLAMA_MODEL_JSON, sys_prompt, user_prompt, want_json=False, temp=0.7, max_tokens=400, task_desc=u"Отчет Института")
                 if report and not report.startswith("__ERROR"):
                     store.ai_reports.append(report)
@@ -3533,7 +5782,11 @@ label ai_shop_gen:
         def _shop_thread():
             try:
                 gs=get_state()
-                item_json=ai_call(OLLAMA_MODEL_JSON, PROMPTS["shop_item"], "fem %s%% slutty=%s" % (gs['fem'], gs['corrupt']>30), want_json=True, temp=0.9, max_tokens=300, task_desc=u"Дизайн одежды")
+                _shop_task = (u"Design ONE new sexy clothing item that fits Samantha's current "
+                              u"vibe (WORLD STATE above). Consider her femininity, corruption and "
+                              u"active perks when choosing sluttiness/style. Only JSON.")
+                _shop_user = ai_prefix_world_state(_shop_task, gs, mode=u"compact")
+                item_json=ai_call(OLLAMA_MODEL_JSON, PROMPTS["shop_item"], _shop_user, want_json=True, temp=0.9, max_tokens=300, task_desc=u"Дизайн одежды")
                 if item_json and isinstance(item_json, dict) and 'name' in item_json:
                     ItemClass=getattr(store,'Item',None)
                     if ItemClass:
@@ -3553,7 +5806,11 @@ label ai_trainer(t_type="fitness"):
     python:
         gs=get_state()
         sys_prompt=PROMPTS["training"] % (gs['fem'], gs['fitness'], t_type)
-        advice=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, "Need %s training, fem %s%%" % (t_type, gs['fem']), want_json=False, temp=0.8, max_tokens=300, task_desc=u"Совет тренера")
+        _train_task = (u"Give a 2-3 sentence %s training advice for Samantha, grounded in her "
+                       u"WORLD STATE above (current fitness, tiredness, mood, active perks). "
+                       u"Include a small concrete task she can do right now." % t_type)
+        _train_user = ai_prefix_world_state(_train_task, gs, mode=u"compact")
+        advice=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, _train_user, want_json=False, temp=0.8, max_tokens=300, task_desc=u"Совет тренера")
         if advice and not advice.startswith("__ERROR"):
             renpy.say(None, ai_escape_renpy_text(advice))
             if t_type=="fitness":
@@ -3621,7 +5878,11 @@ label ai_perk_gen:
         def _perk_thread():
             try:
                 gs=get_state()
-                perk_json=ai_call(OLLAMA_MODEL_JSON, PROMPTS["perk"] % (gs['fem'], gs['perks']), "Generate perk fem %s%%" % gs['fem'], want_json=True, temp=0.9, max_tokens=300, task_desc=u"Проектирование перка")
+                _perk_task = (u"Design ONE new persistent perk for Samantha that fits what has "
+                              u"happened to her (see WORLD STATE above — active perks, recent "
+                              u"actions, cycle/pregnancy). Do not duplicate an existing perk. Only JSON.")
+                _perk_user = ai_prefix_world_state(_perk_task, gs, mode=u"compact")
+                perk_json=ai_call(OLLAMA_MODEL_JSON, PROMPTS["perk"] % (gs['fem'], gs['perks']), _perk_user, want_json=True, temp=0.9, max_tokens=300, task_desc=u"Проектирование перка")
                 if perk_json and isinstance(perk_json, dict) and 'name' in perk_json:
                     PerkClass=getattr(store,'PerkClass',None)
                     if PerkClass:
@@ -3650,7 +5911,7 @@ screen ai_hub():
                 background "#1a1a3a" xfill True ysize 60
                 hbox:
                     xfill True
-                    text "AI HUB - Все системы | Фем [ai_fem]%" size 20 bold True color "#ff88ff"
+                    text "AI HUB - Все системы | Принятие [ai_accept]%" size 20 bold True color "#ff88ff"
                     textbutton "X" action Return() xalign 1.0
             viewport:
                 scrollbars "vertical" mousewheel True
@@ -3769,8 +6030,12 @@ label ai_trainer_fem:
 label ai_cloth_advice:
     python:
         gs=get_state()
-        sys_prompt="You are wardrobe advisor for former man in female body, fem %s%%. Advise what to wear from items like item_top_22, item_bottom_15. Russian short." % gs['fem']
-        advice=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, "Advice fem %s%% outfit %s" % (gs['fem'], gs.get('outfit','')), want_json=False, temp=0.8, max_tokens=300, task_desc=u"Совет по одежде")
+        sys_prompt="You are wardrobe advisor for former man in female body, self-acceptance %s%%. Advise what to wear from items like item_top_22, item_bottom_15. Russian short." % gs.get('accept', 20)
+        _cloth_task = (u"Coротко посоветуй Саманте, во что переодеться прямо сейчас, исходя из WORLD "
+                       u"STATE выше (нынешняя одежда по слотам, локация, настроение, spicy_level, "
+                       u"активные перки). Ответь по-русски, 2-3 короткие фразы, конкретные item id.")
+        _cloth_user = ai_prefix_world_state(_cloth_task, gs, mode=u"compact")
+        advice=ai_call(OLLAMA_MODEL_CHAT, sys_prompt, _cloth_user, want_json=False, temp=0.8, max_tokens=300, task_desc=u"Совет по одежде")
         if advice and not advice.startswith("__ERROR"):
             renpy.say(None, ai_escape_renpy_text(advice))
     return
@@ -3925,7 +6190,11 @@ init python:
                 npc_profile = ai_get_npc_profile_prompt(npc)
                 sys_prompt = PROMPTS["sms"] + "\n" + npc_profile
                 
-                sms_text = ai_call(OLLAMA_MODEL_CHAT, sys_prompt, "SMS from %s fem %s%%, current outfit is %s." % (npc_name, gs['fem'], gs.get('outfit','')), want_json=False, temp=0.85, max_tokens=200, task_desc=u"SMS от " + npc_name)
+                _sms_task = (u"Write ONE short in-character SMS from %s to Samantha, matching the "
+                             u"NPC's profile above and the WORLD STATE (Samantha's current outfit, "
+                             u"location and mood). 1-2 sentences." % npc_name)
+                _sms_user = ai_prefix_world_state(_sms_task, gs, mode=u"compact")
+                sms_text = ai_call(OLLAMA_MODEL_CHAT, sys_prompt, _sms_user, want_json=False, temp=0.85, max_tokens=200, task_desc=u"SMS от " + npc_name)
                 if sms_text and not sms_text.startswith("__ERROR"):
                     store.ai_prefetched_sms = {"from": npc_name, "text": sms_text, "day": gs.get('day', 0)}
                     print("Prefetched SMS from %s successfully!" % npc_name)
@@ -4051,8 +6320,11 @@ init python:
                         def _trigger_time_event():
                             try:
                                 gs = get_state()
-                                recent_acts = "\\n- ".join(getattr(store, 'ai_recent_actions', []))
-                                prompt = "TIME TRIGGER EVENT: One hour has passed. Current location is %s. Fem %s%%. Recent activities: %s. Generate a dynamic event. JSON." % (gs['location'], gs['fem'], recent_acts)
+                                _hourly_task = (u"TIME TRIGGER: one hour has passed. Generate ONE "
+                                                u"short dynamic event that could naturally happen to "
+                                                u"Samantha RIGHT NOW at her current location, given "
+                                                u"the WORLD STATE above. 2-3 choices with effects. Only JSON.")
+                                prompt = ai_prefix_world_state(_hourly_task, gs, mode=u"full")
                                 evt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.85, max_tokens=700, task_desc=u"Почасовое событие")
                                 if evt and hasattr(evt, 'get'):
                                     store.ai_current_automatic_event = ai_normalize_event(evt)
@@ -4165,6 +6437,14 @@ init python:
                     # Храним только последние 8 действий, чтобы не перегружать контекст модели
                     store.ai_recent_actions = store.ai_recent_actions[-8:]
 
+                    # НОВОЕ: отдельный лог только локаций — модели удобнее читать
+                    # чистую траекторию перемещений без словесных обёрток.
+                    if not getattr(store, 'ai_recent_locations', None):
+                        store.ai_recent_locations = []
+                    _hour_now = getattr(store.t, 'hour', 12) if hasattr(store, 't') else 12
+                    store.ai_recent_locations.append(u"%s@%sh" % (loc_name, _hour_now))
+                    store.ai_recent_locations = store.ai_recent_locations[-6:]
+
                     if AI_LOW_VRAM_SAFE_MODE:
                         return _orig_travel_walk(location, *args, **kwargs)
                     
@@ -4185,10 +6465,12 @@ init python:
                             is_spicy = py_random.randint(0, 100) < ai_get_spicy_chance()
                             spicy_level = ai_get_spicy_level()
                             
-                            # Передаем недавние действия GG и описание окружения в промпт ИИ
-                            recent_acts = "\\n- ".join(getattr(store, 'ai_recent_actions', []))
-                            loc_atmosphere = ai_get_location_description(loc_name)
-                            prompt = "DESTINATION TRAVEL: Player has just arrived at %s (%s). Location Atmosphere: %s. Population: %s people around. Time %s (%s). Fem %s%%, outfit %s. Recent Sammy activities:\\n- %s\\nGenerate arrival event. JSON." % (loc_name, loc_desc, loc_atmosphere, gs.get('location_population',0), gs['timeofday'], gs['hour'], gs['fem'], gs['outfit'], recent_acts)
+                            _dest_task = (u"DESTINATION TRAVEL: Samantha has just arrived at %s (%s). "
+                                          u"Generate a short arrival event grounded in the WORLD STATE "
+                                          u"above (her current outfit / mood / cycle / active perks) "
+                                          u"and the location context. Branching choices with effects. Only JSON."
+                                          % (loc_name, loc_desc))
+                            prompt = ai_prefix_world_state(_dest_task, gs, mode=u"full")
                             evt = ai_call(OLLAMA_MODEL_JSON, PROMPTS["event"], prompt, want_json=True, temp=0.85, max_tokens=700, task_desc=u"Авто-квест для " + loc_desc)
                             if evt and isinstance(evt, dict) and not evt.get('title', '').startswith("__ERROR"):
                                 if ai_filter_event_by_comfort(evt):
