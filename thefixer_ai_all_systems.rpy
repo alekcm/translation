@@ -86,6 +86,13 @@ init python:
     # Это on-demand chain (NOT tree upfront).
     AI_QUEST_ONE_STEP_TEST_MODE = True   # один step на ai_call — да, но цепочка не ограничена
     AI_QUEST_MAX_STEPS = 5               # жёсткий потолок: после 5-го шага финал форсируется
+    # МИНИМАЛЬНОЕ число шагов до финала. Слабая 2-битная модель почти
+    # всегда копирует `IS_ENDING: true` из шаблона на первом же выборе,
+    # и игрок мгновенно уходит на ending-screen после 1 клика. Форсируем
+    # минимум N шагов ДО ТОГО, как is_ending от LLM будет уважён.
+    # 3 — комфортный минимум (setup / развитие / финал). До этого is_ending
+    # игнорируется, движок продолжает генерить следующий шаг.
+    AI_QUEST_MIN_STEPS_BEFORE_ENDING = 3
     AI_FULL_QUEST_MIN_STEPS = 1
     AI_FULL_QUEST_MAX_STEPS = 1
     # РАЗМЕР ОТВЕТА. Раньше стояло 450 — не хватало на длинный
@@ -99,7 +106,7 @@ init python:
     AI_EVENT_MAX_TOKENS = 420
     AI_PREFETCH_MAX_TOKENS = 280
     AI_EVENT_DEBUG = True
-    AI_PATCH_BUILD = "2026-07-11-2nd-person-choices+park-toilet-outside"
+    AI_PATCH_BUILD = "2026-07-11-portrait-directives+validator+manual-fallback"
     ai_ollama_global_lock = threading.Lock()
 
     # Текстовые описания 3D-окружения на основе скриншотов из папки Фотографии (для погружения ИИ в обстановку)
@@ -152,6 +159,89 @@ init python:
         clean_id = loc_id.replace("loc_", "")
         return AI_LOCATION_DESCRIPTIONS.get(clean_id, "A scenic location in Blaston.")
 
+    # =====================================================================
+    # САНИТАЙЗЕР PLACEHOLDER'ОВ И «ДЕТСКИХ» СЛОВ
+    # ---------------------------------------------------------------------
+    # 2-битные GGUF регулярно копируют плейсхолдеры из шаблона:
+    #   "A_MAN_1 leans against a nearby trash can..." /
+    #   "<persona A>" / "A_WOMAN_2 watches" / "NAMED_MAN".
+    # Плюс любят фон "kids play on the swings" — рядом с NSFW это плохо
+    # даже если сексуального намёка нет.
+    # Этот санитайзер бьёт по всем полям, которые идут в UI: title, desc,
+    # step.desc, ending_title, ending_text, choice.text.
+    # =====================================================================
+    _AI_PLACEHOLDER_RE = re.compile(
+        r'(?:'
+        r'A[_\s]MAN[_\s]?\d*'      # A_MAN_1 / A MAN 2 / A_MAN
+        r'|A[_\s]WOMAN[_\s]?\d*'   # A_WOMAN_1
+        r'|A[_\s]GIRL[_\s]?\d*'
+        r'|A[_\s]GUY[_\s]?\d*'
+        r'|NAMED[_\s](?:MAN|WOMAN|GIRL|GUY|NPC)[_\s]?\d*'
+        r'|PERSONA[_\s]?[A-Z]?\d*'
+        r'|NPC[_\s]?\d+'
+        r')',
+        re.IGNORECASE
+    )
+    # <persona A>, <man>, <name>, <npc 1>, <someone>
+    _AI_ANGLE_PLACEHOLDER_RE = re.compile(
+        r'<\s*(?:persona|npc|man|woman|girl|guy|name|someone|character)[^>]{0,40}>',
+        re.IGNORECASE
+    )
+    # Замены слов, которые нельзя видеть в NSFW-сценах. Мы НЕ переписываем
+    # смысл, только меняем токен на нейтральный, чтобы фон не «омолодился».
+    _AI_MINOR_WORD_SUBS = [
+        (re.compile(r'\bkids?\b', re.IGNORECASE),          u"people"),
+        (re.compile(r'\bchildren\b', re.IGNORECASE),       u"people"),
+        (re.compile(r'\bchild\b', re.IGNORECASE),          u"person"),
+        (re.compile(r'\bteen(?:s|ager|agers)?\b', re.IGNORECASE), u"adults"),
+        (re.compile(r'\bschoolgirls?\b', re.IGNORECASE),   u"women"),
+        (re.compile(r'\bschoolboys?\b', re.IGNORECASE),    u"men"),
+        (re.compile(r'\bminors?\b', re.IGNORECASE),        u"adults"),
+        (re.compile(r'\btoddlers?\b', re.IGNORECASE),      u"adults"),
+        (re.compile(r'\bbabies\b', re.IGNORECASE),         u"adults"),
+        (re.compile(r'\bbaby\b', re.IGNORECASE),           u"adult"),
+        # "the swings" / "the playground" тоже смещают сцену. Не критично,
+        # но лучше нейтрализовать, если рядом были дети.
+        (re.compile(r'\bplaying on the swings\b', re.IGNORECASE), u"passing by"),
+        (re.compile(r'\bon the swings\b', re.IGNORECASE),  u"nearby"),
+        (re.compile(r'\bat the playground\b', re.IGNORECASE), u"in the park"),
+    ]
+
+    def ai_sanitize_ui_text(text):
+        """Убирает placeholder-имена и «детские» слова из строки, которая
+        пойдёт в UI. Возвращает str/unicode того же типа. Идемпотентна."""
+        if text is None:
+            return u""
+        try:
+            s = unicode(text) if not isinstance(text, basestring) else unicode(text)
+        except Exception:
+            try:
+                s = u"%s" % text
+            except Exception:
+                return u""
+        try:
+            # 1) Плейсхолдеры-имена → "a man" / "a woman" (нейтрально).
+            def _placeholder_sub(m):
+                token = m.group(0).lower()
+                if u"woman" in token or u"girl" in token:
+                    return u"a woman"
+                if u"man" in token or u"guy" in token:
+                    return u"a man"
+                return u"someone"
+            s = _AI_PLACEHOLDER_RE.sub(_placeholder_sub, s)
+            s = _AI_ANGLE_PLACEHOLDER_RE.sub(u"someone", s)
+            # 2) Слова-триггеры про несовершеннолетних.
+            for rx, repl in _AI_MINOR_WORD_SUBS:
+                s = rx.sub(repl, s)
+            # 3) Двойные пробелы после замен.
+            s = re.sub(r'\s{2,}', u' ', s).strip()
+        except Exception as e:
+            try:
+                print("ai_sanitize_ui_text err: %s" % e)
+            except Exception:
+                pass
+        return s
+
     # Экранирование фигурных скобок для предотвращения крашей RenPy из-за "Unknown text tag"
     def ai_escape_renpy_text(text):
         if text is None:
@@ -183,6 +273,390 @@ init python:
             fh.close()
         except Exception as e:
             print("ai_write_debug_file err: %s" % e)
+
+    # =====================================================================
+    # PLAYER EMOTIONAL PORTRAIT
+    # ---------------------------------------------------------------------
+    # Хранится в файле рядом с игрой: player_portrait.txt (тот же путь,
+    # что и ai_last_prompt.txt — cwd Ren'Py = папка игры).
+    # Читается перед каждым квестовым промптом и подставляется как блок
+    # [PLAYER PORTRAIT]. Игрок может править файл вручную — движок никогда
+    # не переписывает файл без явной команды из экрана Portrait.
+    # =====================================================================
+    AI_PORTRAIT_FILE = "player_portrait.txt"
+    AI_PORTRAIT_MAX_CHARS = 1500       # чтобы не раздувать промпт
+
+    def ai_get_player_portrait_text():
+        """Возвращает содержимое player_portrait.txt (или пустую строку,
+        если файла нет). Обрезает до AI_PORTRAIT_MAX_CHARS."""
+        try:
+            if not os.path.exists(AI_PORTRAIT_FILE):
+                return u""
+            fh = codecs.open(AI_PORTRAIT_FILE, "r", "utf-8")
+            txt = fh.read()
+            fh.close()
+            if txt is None:
+                return u""
+            txt = unicode(txt).strip()
+            if len(txt) > AI_PORTRAIT_MAX_CHARS:
+                txt = txt[:AI_PORTRAIT_MAX_CHARS] + u"\n... (truncated)"
+            return txt
+        except Exception as e:
+            print("ai_get_player_portrait_text err: %s" % e)
+            return u""
+
+    def ai_reload_player_portrait_from_file():
+        """Читает файл и кладёт содержимое в store.ai_portrait_last_summary,
+        чтобы UI Portrait отобразил актуальный текст."""
+        try:
+            txt = ai_get_player_portrait_text()
+            store.ai_portrait_last_summary = txt or u""
+        except Exception as e:
+            print("ai_reload_player_portrait_from_file err: %s" % e)
+
+    def ai_clear_player_portrait_file():
+        """Стирает файл (пишет пустую строку) и очищает store-кеш."""
+        try:
+            fh = codecs.open(AI_PORTRAIT_FILE, "w", "utf-8")
+            fh.write(u"")
+            fh.close()
+            store.ai_portrait_last_summary = u""
+            try:
+                renpy.notify(u"Портрет очищен")
+            except Exception:
+                pass
+        except Exception as e:
+            print("ai_clear_player_portrait_file err: %s" % e)
+
+    def _ai_portrait_build_manual_fallback(wish_entries, user_free_text):
+        """Собирает портрет ВРУЧНУЮ, без LLM. Используется как fallback,
+        если dirty-muse сгенерировала невалидный/нежный/off-topic текст.
+        Возвращает готовый structured summary в формате TONE/DO/AVOID/KEY THEMES,
+        построенный из wishlist-тегов и свободного текста."""
+        try:
+            names = [e['name'] for e in wish_entries if e.get('name')]
+            themes_line = u", ".join(names) if names else u"(no explicit desired themes)"
+            # Простые эвристики для тона: если в wishlist есть жёсткие теги —
+            # тон жёстче. Если только femininity/crossdressing — мягче.
+            hard_ids = {u'noncon', u'violence', u'bdsm_hard', u'slavery', u'freeuse',
+                        u'prostitution', u'humiliation', u'gender_bender_humiliation',
+                        u'bullying', u'blackmail', u'watersports', u'scat',
+                        u'menstruation_sex', u'drugs_hard'}
+            wish_ids = {e.get('id') for e in wish_entries}
+            has_hard = bool(wish_ids & hard_ids)
+            if has_hard:
+                tone_line = u"harsh, degrading, no aftercare pretense — the player wants weight and consequence, not romance"
+            else:
+                tone_line = u"pressure and awkwardness over romance — Samantha's body forced into situations, no tender relief"
+            do_line = u"lean HARD into the KEY THEMES below; make every scene use at least one of them explicitly"
+            avoid_line = (u"generic sissy fluff, 'devoted pet' romance prose, "
+                          u"warm-master vibes UNLESS the player explicitly wrote it in FREE_TEXT")
+            free_note = (u"FREE_TEXT from player: %s" % user_free_text) if user_free_text else u"FREE_TEXT: (empty)"
+            return (
+                u"TONE: %s.\n"
+                u"KEY THEMES: %s.\n"
+                u"DO: %s.\n"
+                u"AVOID: %s.\n"
+                u"%s"
+            ) % (tone_line, themes_line, do_line, avoid_line, free_note)
+        except Exception as e:
+            print("_ai_portrait_build_manual_fallback err: %s" % e)
+            return u"(portrait fallback failed)"
+
+    def _ai_portrait_validate_summary(summary, wish_entries, user_free_text):
+        """Проверяет, что LLM реально учла wishlist. Возвращает (ok, reason).
+
+        Правила:
+          - summary непустая и не error-плейсхолдер
+          - есть хотя бы одна из structured-меток (TONE/DO/AVOID/KEY THEMES/THEMES)
+            ИЛИ упомянут хотя бы один tag id/name из wishlist
+          - НЕ содержит явных «нежных» фраз, если в wishlist есть hard-теги
+        """
+        try:
+            if not summary or len(summary) < 40:
+                return False, u"too short"
+            low = summary.lower()
+            if any(bad in low for bad in (u"__error", u"i cannot", u"i can't", u"as an ai", u"sorry, but")):
+                return False, u"refusal / error text"
+            # Проверяем «структурность» ИЛИ упоминание тегов.
+            has_structure = any(k in summary for k in (u"TONE:", u"KEY THEMES:", u"DO:", u"AVOID:", u"THEMES:"))
+            wish_hits = 0
+            for e in wish_entries:
+                tid = (e.get('id') or u"").lower()
+                nm  = (e.get('name') or u"").lower()
+                if tid and tid in low:
+                    wish_hits += 1
+                elif nm and len(nm) >= 4 and nm in low:
+                    wish_hits += 1
+            if not has_structure and wish_hits == 0 and wish_entries:
+                return False, u"no structure, no wishlist hits"
+            # Если в wishlist есть hard-теги, но summary про «devotion/pet/master/tender/warm» —
+            # LLM свалилась в дефолтную sissy-fem прозу и проигнорировала теги.
+            hard_ids = {u'noncon', u'violence', u'bdsm_hard', u'slavery', u'freeuse',
+                        u'humiliation', u'gender_bender_humiliation', u'bullying', u'blackmail'}
+            wish_ids = {(e.get('id') or u"").lower() for e in wish_entries}
+            has_hard = bool(wish_ids & hard_ids)
+            soft_words = (u"devot", u"pet ", u"pet,", u"pet.", u"tender", u"warm and",
+                          u"blissful", u"beloved", u"adore", u"eager to please",
+                          u"master's every", u"belonging")
+            soft_hits = sum(1 for w in soft_words if w in low)
+            if has_hard and soft_hits >= 2 and wish_hits == 0:
+                return False, u"soft-drift while wishlist is hard"
+            return True, u"ok"
+        except Exception as e:
+            return False, u"validator crash: %s" % e
+
+    def ai_generate_player_portrait_and_save():
+        """Собирает wishlist (level>=3) + свободный текст и формирует
+        `player_portrait.txt`. Формат — жёстко структурированный
+        (TONE / KEY THEMES / DO / AVOID / FREE_TEXT), чтобы квестовая
+        LLM не могла его «пропустить».
+
+        LLM (dirty-muse) вызывается как «director notes writer»: пишет
+        только 3-4 короткие директивы. Если валидатор говорит, что она
+        сдрейфила в дефолтную sissy-fem прозу — используем ручной
+        fallback на основе wishlist без LLM.
+        """
+        try:
+            store.ai_portrait_generating = True
+            try:
+                renpy.restart_interaction()
+            except Exception:
+                pass
+
+            user_free_text = ai_to_text(getattr(store, 'ai_portrait_input_text', u""), u"").strip()
+
+            # Собираем wishlist из AI_COMFORT_TAGS (level>=3).
+            wish_entries = []
+            try:
+                from ai_config_tags import AI_COMFORT_TAGS
+                for t in AI_COMFORT_TAGS:
+                    try:
+                        lvl = int(t.get('level', 0))
+                    except Exception:
+                        lvl = 0
+                    if lvl >= 3:
+                        wish_entries.append({
+                            'id':   t.get('id') or u"?",
+                            'name': t.get('name') or t.get('id') or u"?",
+                            'desc': t.get('desc') or u"",
+                        })
+            except Exception as _we:
+                print("ai_generate_player_portrait wishlist err: %s" % _we)
+
+            wish_lines = [
+                u"- %s (id=%s): %s" % (e['name'], e['id'], e['desc'])
+                for e in wish_entries
+            ]
+            wish_block = u"\n".join(wish_lines) if wish_lines else u"(player marked NO tags as desired)"
+
+            # SYSTEM PROMPT: жёстко в стиле "director's notes for another AI",
+            # третье лицо, императивы. dirty-muse без такой рамки скатывается
+            # в свою любимую sissy-fem прозу про "beloved pet devotion".
+            sys_prompt = (
+                u"You are an author's DIRECTOR NOTES editor for an adult text game about Samantha.\n"
+                u"Task: read the player's DESIRED_TAGS list and their FREE_TEXT wish, then output\n"
+                u"a set of directives for OTHER AI writers on what kind of scenes the player wants.\n"
+                u"\n"
+                u"RULES:\n"
+                u"- OUTPUT EXACTLY THESE 5 LINES, IN THIS ORDER, EACH ON ITS OWN LINE, EACH LABEL IN CAPS:\n"
+                u"  TONE: <1 sentence — emotional register the player wants>\n"
+                u"  KEY THEMES: <comma-separated list, MUST be a subset of the DESIRED_TAGS names>\n"
+                u"  DO: <1-2 sentences — what scenes must include>\n"
+                u"  AVOID: <1 sentence — what breaks immersion for THIS player>\n"
+                u"  FREE_TEXT: <one sentence paraphrase of the player's own wish, or 'none' if empty>\n"
+                u"- WRITE ABOUT THE PLAYER IN THIRD PERSON (\"the player wants...\", \"they prefer...\").\n"
+                u"- NEVER address Samantha. NEVER address the player as 'you'. NEVER write prose or a story.\n"
+                u"- NEVER use words like 'devotion', 'beloved', 'pet', 'tender', 'blissful', 'warm master',\n"
+                u"  'eager to please', UNLESS those exact words appear in the DESIRED_TAGS or FREE_TEXT.\n"
+                u"- KEY THEMES MUST cite the actual tags from DESIRED_TAGS. If the wishlist is hard\n"
+                u"  (noncon, violence, freeuse, humiliation, prostitution, slavery, bdsm_hard, bullying,\n"
+                u"  blackmail, watersports, scat) — TONE must match that hardness. DO NOT soften it.\n"
+                u"- English only. No JSON. No markdown. No greetings. No sign-off."
+            )
+            user_prompt = (
+                u"DESIRED_TAGS (player marked level=3):\n"
+                u"%s\n\n"
+                u"FREE_TEXT:\n"
+                u"%s\n\n"
+                u"Now write the 5-line directives. Remember: TONE / KEY THEMES / DO / AVOID / FREE_TEXT."
+            ) % (wish_block, user_free_text or u"(empty)")
+
+            summary = u""
+            try:
+                summary = ai_call(
+                    OLLAMA_MODEL_CHAT,
+                    sys_prompt,
+                    user_prompt,
+                    want_json=False,
+                    temp=0.25,          # низкая температура — меньше самодеятельности
+                    max_tokens=350,
+                    task_desc=u"Player portrait",
+                    force_json_format=False,
+                )
+            except Exception as _ce:
+                print("ai_generate_player_portrait ai_call err: %s" % _ce)
+                summary = u""
+
+            if not isinstance(summary, (str, unicode)):
+                summary = u""
+            summary = unicode(summary).strip()
+
+            # Дебаг-дамп сырых входов/выходов LLM для отладки портрета.
+            # Пишется всегда, чтобы если игрок жалуется на портрет — можно было
+            # быстро посмотреть, что реально ушло в dirty-muse и что она вернула.
+            try:
+                debug_dump = (
+                    u"[BUILD] %s\n\n"
+                    u"[SYS PROMPT]\n%s\n\n"
+                    u"[USER PROMPT]\n%s\n\n"
+                    u"[LLM RAW RESPONSE]\n%s\n"
+                ) % (AI_PATCH_BUILD, sys_prompt, user_prompt, summary or u"(empty)")
+                ai_write_debug_file("ai_portrait_debug.txt", debug_dump)
+            except Exception as _de:
+                print("portrait debug dump err: %s" % _de)
+
+            # Валидация — реально ли LLM учла wishlist?
+            ok, why = _ai_portrait_validate_summary(summary, wish_entries, user_free_text)
+            fallback_used = False
+            if not ok:
+                print("Portrait validator rejected LLM output: %s" % why)
+                # Пробуем один раз ещё жёстче: temp=0.15, короче.
+                retry_sys = sys_prompt + (
+                    u"\n\nCRITICAL: your previous answer was REJECTED because it did not follow the 5-line "
+                    u"format or ignored the DESIRED_TAGS. Now output ONLY the 5 required labelled lines. "
+                    u"Nothing else. Every KEY THEMES entry MUST come from DESIRED_TAGS."
+                )
+                try:
+                    summary2 = ai_call(
+                        OLLAMA_MODEL_CHAT,
+                        retry_sys,
+                        user_prompt,
+                        want_json=False,
+                        temp=0.15,
+                        max_tokens=350,
+                        task_desc=u"Player portrait retry",
+                        force_json_format=False,
+                    )
+                except Exception:
+                    summary2 = u""
+                if not isinstance(summary2, (str, unicode)):
+                    summary2 = u""
+                summary2 = unicode(summary2).strip()
+                ok2, why2 = _ai_portrait_validate_summary(summary2, wish_entries, user_free_text)
+                # Дописываем retry в дебаг-файл, чтобы был виден и второй заход.
+                try:
+                    with codecs.open("ai_portrait_debug.txt", "a", "utf-8") as _fh:
+                        _fh.write(
+                            u"\n[VALIDATOR REJECTED FIRST ATTEMPT] %s\n"
+                            u"\n[LLM RETRY RAW RESPONSE]\n%s\n"
+                            u"\n[VALIDATOR SECOND RESULT] ok=%s why=%s\n"
+                            % (why, summary2 or u"(empty)", ok2, why2)
+                        )
+                except Exception:
+                    pass
+                if ok2:
+                    summary = summary2
+                else:
+                    print("Portrait retry also rejected: %s -> using manual fallback" % why2)
+                    summary = _ai_portrait_build_manual_fallback(wish_entries, user_free_text)
+                    fallback_used = True
+
+            # Собираем итоговый файл. КРИТИЧНО: в промпт квестов идёт ВСЁ —
+            # и wishlist сырым, и summary. Даже если summary плохой,
+            # wishlist LLM квестов увидит напрямую.
+            header = (
+                u"# player_portrait.txt — эмоциональный портрет игрока\n"
+                u"# Правь этот файл руками — движок читает его перед каждым квестом.\n"
+                u"# Всё выше маркера ---USER NOTES--- уходит в промпт как блок [PLAYER PORTRAIT].\n"
+                u"# fallback_used=%s (True = LLM промахнулась, портрет собран вручную из wishlist)\n"
+            ) % (u"yes" if fallback_used else u"no")
+            body = (
+                u"[DESIRED_TAGS]\n%s\n\n"
+                u"[DIRECTIVES]\n%s\n\n"
+                u"---USER NOTES---\n(private notes here — not sent to LLM)\n"
+            ) % (wish_block, summary)
+
+            try:
+                fh = codecs.open(AI_PORTRAIT_FILE, "w", "utf-8")
+                fh.write(header + u"\n" + body)
+                fh.close()
+            except Exception as _we:
+                print("ai_generate_player_portrait write err: %s" % _we)
+                try:
+                    renpy.notify(u"Ошибка записи portrait: %s" % _we)
+                except Exception:
+                    pass
+                return False
+
+            # В UI показываем summary (директивы), а не сырой файл.
+            store.ai_portrait_last_summary = summary
+            try:
+                if fallback_used:
+                    renpy.notify(u"LLM промахнулась — портрет собран вручную")
+                else:
+                    renpy.notify(u"Портрет сохранён в player_portrait.txt")
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            print("ai_generate_player_portrait_and_save fatal: %s" % e)
+            return False
+        finally:
+            store.ai_portrait_generating = False
+            try:
+                renpy.restart_interaction()
+            except Exception:
+                pass
+
+    def ai_start_player_portrait_thread():
+        """Запускает генерацию портрета в фоновом потоке, чтобы UI не
+        замерзал на 10-30 сек ai_call'а."""
+        try:
+            if getattr(store, 'ai_portrait_generating', False):
+                try:
+                    renpy.notify(u"Уже генерирую...")
+                except Exception:
+                    pass
+                return
+            def _worker():
+                try:
+                    ai_generate_player_portrait_and_save()
+                except Exception as e:
+                    print("ai_start_player_portrait_thread worker err: %s" % e)
+                finally:
+                    try:
+                        renpy.restart_interaction()
+                    except Exception:
+                        pass
+            import threading as _th
+            _th.Thread(target=_worker).start()
+        except Exception as e:
+            print("ai_start_player_portrait_thread err: %s" % e)
+
+    def ai_get_player_portrait_for_prompt():
+        """Возвращает СЖАТЫЙ портрет для вставки в промпт. Обрезает всё,
+        что после маркера '---USER NOTES---'. Обрезает до 800 символов —
+        экономим бюджет промпта. Пустая строка = блок в промпт не идёт."""
+        try:
+            txt = ai_get_player_portrait_text()
+            if not txt:
+                return u""
+            # Отрезаем "---USER NOTES---" и всё после.
+            cut = txt.split(u"---USER NOTES---", 1)[0]
+            # Отрезаем комментарии-строки, начинающиеся с "#".
+            keep = []
+            for line in cut.splitlines():
+                if line.strip().startswith(u"#"):
+                    continue
+                keep.append(line)
+            cleaned = u"\n".join(keep).strip()
+            if len(cleaned) > 800:
+                cleaned = cleaned[:800] + u"..."
+            return cleaned
+        except Exception as e:
+            print("ai_get_player_portrait_for_prompt err: %s" % e)
+            return u""
 
     def ai_set_event_debug(reason, raw=None, parsed=None):
         try:
@@ -270,12 +744,35 @@ init python:
 
         title = ai_to_text(evt.get('title', u'Событие'), u'Событие')
         desc = ai_to_text(evt.get('description', u'...'), u'...')
+        # Санитайзер: убираем A_MAN_1 / <persona X> / kids / children etc.
+        try:
+            title = ai_sanitize_ui_text(title)
+            desc = ai_sanitize_ui_text(desc)
+        except Exception:
+            pass
+        # После санитайзера title мог стать бессмысленным ("a man" или пусто) —
+        # ловим deg-cases и заменяем на нейтральный "Quest Challenge".
+        try:
+            _t_stripped = title.strip() if title else u""
+            _t_low = _t_stripped.lower()
+            _bad_title_after = (
+                (not _t_stripped) or
+                (_t_low in (u"a man", u"a woman", u"someone", u"...", u"none", u"none.")) or
+                # slug вида "a_man_1_leans_against..." — после санитайзера мог
+                # остаться формат "a_man leans_against_a_nearby_trash_can...".
+                # slug'и слитных подчёркиваний в title недопустимы.
+                (u"_" in _t_stripped and _t_stripped.count(u"_") >= 3 and u" " not in _t_stripped)
+            )
+            if _bad_title_after:
+                title = u"Quest Challenge"
+        except Exception:
+            pass
         if not desc or desc.strip() in [u"", u"...", u"None", u"None."]:
             desc = u"Samantha continues her femininity training, making choices that shape her new life."
-            evt['description'] = desc
+        evt['description'] = desc
         if not title or title.strip() in [u"", u"...", u"None", u"None."]:
             title = u"Quest Challenge"
-            evt['title'] = title
+        evt['title'] = title
 
         choices = evt.get('choices', []) or []
         # Квесты теперь могут иметь 2-4 разных персона-реакции + опционально
@@ -290,6 +787,11 @@ init python:
                     ct = ai_to_text(ch.get('text', u'Continue'), u'Continue')
                     if not ct or ct.strip() in [u"", u"...", u"None"]:
                         ct = u"Continue"
+                    # Санитайзер плейсхолдеров/детских слов
+                    try:
+                        ct = ai_sanitize_ui_text(ct)
+                    except Exception:
+                        pass
                     # Пост-фикс "первого лица". Правило "choice.text — это то,
                     # что делает Саманта, во втором лице, начиная с You" часто
                     # игнорируется слабой моделью, и на кнопке всплывает
@@ -360,13 +862,22 @@ init python:
                     # perk_add may sit on choice root in some model outputs
                     if 'perk_add' not in eff and ch.get('perk_add') is not None:
                         eff['perk_add'] = ch.get('perk_add')
+                    _et = ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None)))
+                    _ex = ch.get('ending_text',  ch.get('endingText',  ch.get('result_text', ch.get('ending', None))))
+                    try:
+                        if _et is not None:
+                            _et = ai_sanitize_ui_text(_et)
+                        if _ex is not None:
+                            _ex = ai_sanitize_ui_text(_ex)
+                    except Exception:
+                        pass
                     safe_ch = {
                         "text": ct,
                         "effects": eff,
                         "next_step": ch.get('next_step', ch.get('next', ch.get('goto', None))),
                         "spicy_modifier": ch.get('spicy_modifier', ch.get('spicy', 0)),
-                        "ending_title": ch.get('ending_title', ch.get('endingTitle', ch.get('result_title', None))),
-                        "ending_text": ch.get('ending_text', ch.get('endingText', ch.get('result_text', ch.get('ending', None)))),
+                        "ending_title": _et,
+                        "ending_text": _ex,
                         "is_ending": bool(ch.get('is_ending', False)),
                     }
                     safe_choices.append(safe_ch)
@@ -1131,9 +1642,29 @@ Guidelines:
                 quest["description"] = val
                 last_ref = (quest, "description")
             elif key in ("STEP", "STEP_ID"):
-                cur_step = _new_step(val)
-                cur_choice = None
-                last_ref = None
+                # ЗАЩИТА: 2-битные модели часто игнорируют "STEP: step1" и
+                # вместо id пишут туда описание/сцену/имена персонажей
+                # ("STEP: A MAN 1 leans against a nearby trash can..."). Такой
+                # val нельзя брать как id — он потом slugified'ится в
+                # normalize_quest_tree и вылезает в UI как title сцены.
+                # Эвристика: настоящий id короткий (<=24 симв), без пробелов
+                # ИЛИ ровно "step\d+"; всё остальное считаем описанием.
+                _val_stripped = val.strip()
+                _looks_like_id = bool(_val_stripped) and (
+                    re.match(r'^step[_\-\s]?\d+$', _val_stripped, re.IGNORECASE) or
+                    (len(_val_stripped) <= 24 and u" " not in _val_stripped)
+                )
+                if _val_stripped and not _looks_like_id:
+                    # Это описание, а не id. Заводим шаг без hint и кладём
+                    # текст в description.
+                    cur_step = _new_step()
+                    cur_step["description"] = _val_stripped
+                    cur_choice = None
+                    last_ref = (cur_step, "description")
+                else:
+                    cur_step = _new_step(_val_stripped if _looks_like_id else None)
+                    cur_choice = None
+                    last_ref = None
             elif key == "STEP_TITLE":
                 if cur_step is None:
                     cur_step = _new_step()
@@ -2914,12 +3445,28 @@ Guidelines:
                 sid = "step%d" % (i+1)
             used_ids.add(sid)
 
-            st_title = ai_to_text(step.get('title') or step.get('Title') or sid, sid)
+            # Title: НЕ используем sid как fallback — sid может быть slug'ом
+            # длинной сцены ("A_MAN_1_leans_against..."), который слил бы
+            # мусор в UI. Пусть лучше будет пустая строка → "Stage N".
+            _raw_title = step.get('title') or step.get('Title') or u''
+            st_title = ai_to_text(_raw_title, u'')
             st_desc = ai_to_text(step.get('description') or step.get('Description') or step.get('desc') or u'', u'')
-            if not st_title or st_title.strip() in [u'', u'...', u'Step1', u'step1']:
+            # Отбраковка «пустых» / slug-like / бессмысленных заголовков.
+            _bad_title = (
+                (not st_title) or
+                (st_title.strip() in [u'', u'...', u'None']) or
+                bool(re.match(r'^step[_\-\s]?\d+$', st_title.strip(), re.IGNORECASE)) or
+                # slug вида A_MAN_1_leans_... — длинная строка из подчёркиваний
+                (u"_" in st_title and st_title.count(u"_") >= 3 and u" " not in st_title)
+            )
+            if _bad_title:
                 st_title = u"Stage %d" % (i+1)
+            # ВАЖНО: НЕ подставляем «Stage N of Samantha's challenge continues.
+            # She must choose how to proceed.» — это мета-заглушка, игроку
+            # видеть её бессмысленно. Оставляем пустую строку и полагаемся
+            # на общее описание квеста (склеивается в ai_step_to_event).
             if not st_desc or st_desc.strip() in [u'', u'...', u'None']:
-                st_desc = u"Stage %d of Samantha's challenge continues. She must choose how to proceed." % (i+1)
+                st_desc = u""
 
             outfit = step.get('outfit_suggestion') or step.get('outfit') or {}
             if not ai_dict_like(outfit):
@@ -3098,8 +3645,32 @@ Guidelines:
         if step_desc and step_desc.strip() not in (u'', u'...', u'None'):
             merged_desc_parts.append(step_desc.strip())
         merged_desc = u"\n\n".join(merged_desc_parts) if merged_desc_parts else step_desc
+        # TITLE: раньше брали step.title — это давало "Stage 1" на каждой
+        # сцене (заглушка из normalize). Теперь: сначала пробуем title
+        # квеста (то, что модель написала в TITLE:), потом название шага,
+        # только в самом конце — "Stage N".
+        _quest_title_raw = ai_to_text(full_q.get('title', u''), u'').strip()
+        _step_title_raw = ai_to_text(step.get('title', u''), u'').strip()
+        _title_low = _step_title_raw.lower()
+        _step_looks_generic = (
+            (not _step_title_raw) or
+            _title_low.startswith(u"stage ") or
+            _title_low in (u"quest", u"...", u"none")
+        )
+        if _quest_title_raw and _step_looks_generic:
+            # Название квеста + номер сцены, если сцен несколько.
+            if total and total > 1:
+                _final_title = u"%s — %d/%d" % (_quest_title_raw, step_no, total)
+            else:
+                _final_title = _quest_title_raw
+        elif _step_title_raw:
+            _final_title = _step_title_raw
+        elif _quest_title_raw:
+            _final_title = _quest_title_raw
+        else:
+            _final_title = u"Quest"
         evt = {
-            "title": step.get('title', 'Quest'),
+            "title": _final_title,
             "description": merged_desc,
             "type": "quest",
             "outfit_suggestion": step.get('outfit_suggestion', {}) or {"items": []},
@@ -3329,6 +3900,40 @@ Guidelines:
             return ai_get_forbidden_themes_text()
         except Exception:
             return u""
+
+    def _ai_get_focus_tags_for_location(loc_name):
+        """Возвращает пересечение "желаемых игроком" тегов (level>=3)
+        со списком тегов, разрешённых в текущей локации. Отдаём читаемое
+        имя (name), а не сырой id — модели проще писать сцену вокруг
+        "проституция", чем вокруг "prostitution".
+        """
+        try:
+            from ai_config_tags import AI_COMFORT_TAGS
+        except Exception:
+            return []
+        try:
+            from ai_config_locations import ai_get_allowed_themes_for_location
+            allowed_ids = set(ai_get_allowed_themes_for_location(loc_name or u"home") or [])
+        except Exception:
+            allowed_ids = None  # None = локация неизвестна, не фильтруем
+
+        out = []
+        try:
+            for t in AI_COMFORT_TAGS:
+                try:
+                    lvl = int(t.get('level', 0))
+                except Exception:
+                    lvl = 0
+                if lvl < 3:
+                    continue
+                tid = t.get('id') or u"?"
+                if allowed_ids is not None and tid not in allowed_ids:
+                    continue
+                name = t.get('name') or tid
+                out.append(name)
+        except Exception:
+            pass
+        return out
 
     # -----------------------------------------------------------------
     # Хелперы, которые превращают ЦИФРЫ статов в ЧЕЛОВЕЧЕСКИЕ слова.
@@ -3634,6 +4239,21 @@ Guidelines:
                 u"private" if private else u"public"
             ))
             lines.append(u"spicy=%s (%s). Allowed themes: %s." % (spicy_level, spicy_word, allowed_tags))
+            # FOCUS + PORTRAIT в compact-режиме тоже нужны — они меняют
+            # характер SMS/диалогов/дневника, а не только квестов.
+            try:
+                _focus_tags = _ai_get_focus_tags_for_location(loc)
+                if _focus_tags:
+                    lines.append(u">>> FOCUS: " + u", ".join(_focus_tags[:6]))
+            except Exception:
+                pass
+            try:
+                _portrait = ai_get_player_portrait_for_prompt()
+                if _portrait:
+                    lines.append(u">>> PLAYER PORTRAIT (obey these directives — they define this player's kink):")
+                    lines.append(_portrait)
+            except Exception:
+                pass
             if _forbidden_text:
                 lines.append(u"[FORBIDDEN]")
                 lines.append(_forbidden_text)
@@ -3759,6 +4379,28 @@ Guidelines:
 
         # Темы
         lines.append(u"spicy=%s (%s). Allowed themes: %s." % (spicy_level, spicy_word, allowed_tags))
+
+        # FOCUS — темы, которые игрок пометил как ЖЕЛАЕМЫЕ (level>=3) И
+        # которые вообще допустимы в текущей локации. Отдаём модели как
+        # "жирный акцент": попробуй развернуть сцену через эти темы, а не
+        # просто скользить по allowed-списку. Молчим, если пересечения нет.
+        try:
+            _focus_tags = _ai_get_focus_tags_for_location(loc)
+            if _focus_tags:
+                _focus_str = u", ".join(_focus_tags[:8])
+                lines.append(u">>> FOCUS (player DESIRES these themes here — try to spotlight at least one): %s" % _focus_str)
+        except Exception as _fe:
+            print("focus tags err: %s" % _fe)
+
+        # PLAYER PORTRAIT — если файл заполнен, добавляем блок с явной
+        # директивой "obey", чтобы квестовая LLM не игнорировала его.
+        try:
+            _portrait = ai_get_player_portrait_for_prompt()
+            if _portrait:
+                lines.append(u">>> PLAYER PORTRAIT (obey these directives — they define this player's kink):")
+                lines.append(_portrait)
+        except Exception as _pe:
+            print("portrait inject err: %s" % _pe)
 
         # Forbidden — inline, коротким списком
         if _forbidden_text:
@@ -4079,7 +4721,9 @@ Rules:
 5) ENDING_TEXT: 6-10 sentences of concrete consequence.
 6) IS_ENDING: true only if the branch CLOSES the scene naturally. Otherwise omit — game asks for next step.
 7) Do NOT copy "A_MAN_1" / "Marcus" / "Devon" from the template — use anonymous or WORLD STATE names.
-8) Nothing after the last ENDING_TEXT."""
+8) STEP: MUST be exactly a short id like "step1" (never a sentence). The scene text goes in STEP_DESC, NOT in STEP.
+9) NEVER include children, kids, minors, teens, schoolgirls, schoolboys, playgrounds, swings, toddlers or babies anywhere — not even as passing background. Samantha is ALWAYS in an adult-only environment.
+10) Nothing after the last ENDING_TEXT."""
         kv_user = compact_user + u"\n\nRemember: reply in the KEY: value format above, not JSON."
 
         if AI_QUEST_ONE_STEP_TEST_MODE:
@@ -5254,6 +5898,15 @@ label ai_event_choice:
                             explicit_end = bool(ai_dict_like(ch) and ch.get('is_ending'))
                             steps_so_far = len(full_q.get('steps', []) or [])
                             hit_cap = steps_so_far >= AI_QUEST_MAX_STEPS
+                            # ЗАЩИТА: слабая модель ставит IS_ENDING:true на
+                            # ПЕРВОМ же выборе (копирует из шаблона). Пока
+                            # не сделали AI_QUEST_MIN_STEPS_BEFORE_ENDING шагов —
+                            # игнорируем explicit_end и продолжаем цепочку.
+                            _min_steps = int(globals().get('AI_QUEST_MIN_STEPS_BEFORE_ENDING', 3) or 3)
+                            if explicit_end and steps_so_far < _min_steps and not hit_cap:
+                                print("Full quest: is_ending=true from LLM ignored (only %d/%d steps done, need %d)" % (
+                                    steps_so_far, AI_QUEST_MAX_STEPS, _min_steps))
+                                explicit_end = False
 
                             if explicit_end or hit_cap:
                                 reason = u"explicit is_ending" if explicit_end else (
@@ -5954,6 +6607,7 @@ screen ai_hub():
                         textbutton "Локации" action Call("ai_locations_open") background "#1a3a2a"
                         textbutton "Фракции" action Call("ai_factions_open") background "#3a1a2a"
                         textbutton "Spicy" action Call("ai_spicy_open") background "#3a3a3a"
+                        textbutton "Portrait" action Call("ai_portrait_open") background "#3a1a4a"
                     hbox:
                         spacing 8
                         textbutton "Дебаг локаций" action Call("ai_debug_locations") background "#1a1a1a"

@@ -20,7 +20,8 @@ screen ai_comfort_tags_screen():
                 background "#1a1a2a" xfill True ysize 40
                 hbox:
                     spacing 20
-                    text "0=запрет 1=мягко 2=разрешить" size 12 color "#888"
+                    text "0=запрет 1=мягко 2=разрешить 3=ЖЕЛАЕМО (упор)" size 12 color "#888"
+                    text "После настройки level=3 открой кнопку «Portrait» в HUB." size 11 color "#666" xalign 1.0
                     text "Файл: ai_config_tags.rpy" size 11 color "#666" xalign 1.0
             viewport:
                 scrollbars "vertical" mousewheel True
@@ -32,7 +33,13 @@ screen ai_comfort_tags_screen():
                             _tag_id = tag.get('id','')
                             _tag_desc = tag.get('desc','')
                             _tag_level = tag.get('level',0)
-                            _bg = "#1a2a3a" if _tag_level>0 else "#2a1a1a"
+                            # Цвет фона: level=3 (желаемо) — розовый, 1-2 — синий, 0 — тёмно-красный.
+                            if _tag_level >= 3:
+                                _bg = "#3a1a3a"
+                            elif _tag_level > 0:
+                                _bg = "#1a2a3a"
+                            else:
+                                _bg = "#2a1a1a"
                         frame:
                             background _bg
                             xfill True
@@ -45,9 +52,15 @@ screen ai_comfort_tags_screen():
                                 hbox:
                                     spacing 5
                                     xalign 1.0
-                                    for lvl in [0,1,2]:
+                                    for lvl in [0,1,2,3]:
                                         python:
-                                            _btn_bg = "#2a2a4a" if _tag_level!=lvl else "#ff44aa"
+                                            # Активная кнопка розовая; для 3 (желаемо) — ярко-жёлтая, чтобы отличать от «просто разрешить».
+                                            if _tag_level == lvl and lvl == 3:
+                                                _btn_bg = "#ffaa22"
+                                            elif _tag_level == lvl:
+                                                _btn_bg = "#ff44aa"
+                                            else:
+                                                _btn_bg = "#2a2a4a"
                                         textbutton "[lvl]" action [SetDict(tag,'level',lvl), Function(renpy.restart_interaction)] background _btn_bg text_size 12 xsize 30
                     null height 20
                     text "Как добавлять свои теги: открой game/ai_config_tags.rpy и добавь id/name/desc/level" size 11 color "#666"
@@ -239,6 +252,116 @@ label ai_factions_open:
 
 label ai_spicy_open:
     call screen ai_spicy_config_screen
+    return
+
+# =====================================================================
+# PLAYER EMOTIONAL PORTRAIT
+# ---------------------------------------------------------------------
+# Экран для формирования «эмоционального портрета» игрока. Игрок:
+#   1) в ai_comfort_tags_screen ставит level=3 у тем, которые для него
+#      ЖЕЛАЕМЫ (не просто разрешены).
+#   2) на этом экране пишет свободным текстом «чего я хочу от игры»
+#      (стилистику, кинки, эмоциональный тон, любимые фетиши, табу и т.д.).
+#   3) жмёт «Сформировать портрет» — уходит LLM-запрос, ответ пишется в
+#      player_portrait.txt в корне игры (config.basedir).
+# После этого КАЖДЫЙ квестовый промпт получает этот портрет отдельной
+# строкой [PLAYER PORTRAIT] в контексте. Пользователь может открыть файл
+# в блокноте и править вручную — движок читает файл заново перед каждым
+# квестом.
+# =====================================================================
+
+default ai_portrait_input_text = ""
+default ai_portrait_last_summary = ""
+default ai_portrait_generating = False
+
+screen ai_portrait_screen():
+    modal True
+    zorder 3000
+    add Solid("#000000cc")
+    frame:
+        xalign 0.5 yalign 0.5
+        xsize 900 ysize 660
+        background "#12121a"
+        vbox:
+            xfill True yfill True spacing 6
+            frame:
+                background "#3a1a4a" xfill True ysize 60
+                hbox:
+                    xfill True
+                    vbox:
+                        text "Эмоциональный портрет игрока" size 18 bold True color "#ff88cc"
+                        text "Файл: player_portrait.txt (в папке игры) — можно править руками" size 10 color "#ddb"
+                    textbutton "X" action Return() xalign 1.0
+
+            # Секция 1: список «желаемых» (level=3) тегов
+            frame:
+                background "#1a1a2a" xfill True ysize 130
+                vbox:
+                    spacing 4
+                    text "Твои ЖЕЛАЕМЫЕ темы (level=3):" size 13 bold True color "#ffaa22"
+                    python:
+                        try:
+                            _wish = [t for t in AI_COMFORT_TAGS if int(t.get('level',0)) >= 3]
+                            _wish_names = [t.get('name', t.get('id','?')) for t in _wish]
+                            _wish_line_raw = u", ".join(_wish_names) if _wish_names else u"(ни одного — поставь 3 в списке тегов)"
+                            _wish_line = ai_escape_renpy_text(_wish_line_raw)
+                        except Exception as _e:
+                            _wish_line = u"(ошибка чтения тегов)"
+                    text "[_wish_line]" size 11 color "#ddd"
+
+            # Секция 2: свободный текст
+            # В Ren'Py 7.5.x у input НЕТ multiline — пришлось делать
+            # однострочный ввод с большой длиной. Для длинного/многострочного
+            # портрета проще открыть player_portrait.txt в блокноте.
+            frame:
+                background "#1a1a2a" xfill True ysize 150
+                vbox:
+                    spacing 4
+                    text "Опиши своими словами, чего ты хочешь от игры:" size 13 bold True color "#88ff88"
+                    text "Тон, стилистика, любимые кинки, эмоциональные акценты, желаемые последствия, табу." size 10 color "#888"
+                    text "(Enter = подтвердить. Для длинного текста удобнее править player_portrait.txt в блокноте.)" size 9 color "#666"
+                    frame:
+                        background "#0a0a14" xsize 830 ysize 60
+                        input:
+                            value VariableInputValue("ai_portrait_input_text")
+                            length 800
+                            xsize 810
+                            color "#fff"
+                            size 13
+
+            # Секция 3: кнопки
+            hbox:
+                spacing 15 xalign 0.5
+                textbutton "Сформировать портрет" action Function(ai_start_player_portrait_thread) background "#3a2a5a" text_size 14 sensitive (not ai_portrait_generating)
+                textbutton "Загрузить из файла" action [Function(ai_reload_player_portrait_from_file), Function(renpy.restart_interaction)] background "#2a3a4a" text_size 13
+                textbutton "Очистить" action [SetVariable("ai_portrait_input_text", ""), SetVariable("ai_portrait_last_summary", ""), Function(ai_clear_player_portrait_file)] background "#3a1a1a" text_size 13
+
+            if ai_portrait_generating:
+                text "⏳ Генерирую портрет… может занять 10-30 сек." size 12 color "#ffaa44" xalign 0.5
+
+            # Секция 4: последний summary
+            frame:
+                background "#0f1225" xfill True yfill True
+                viewport:
+                    scrollbars "vertical" mousewheel True
+                    vbox:
+                        spacing 4
+                        text "Текущий портрет (что уходит в промпт квестов):" size 12 bold True color "#88ccff"
+                        python:
+                            try:
+                                _portrait_display = ai_escape_renpy_text(ai_portrait_last_summary) if ai_portrait_last_summary else u"(пусто — нажми «Сформировать» или отредактируй файл вручную)"
+                            except Exception:
+                                _portrait_display = u"(ошибка отображения)"
+                        text "[_portrait_display]" size 12 color "#ddd" xsize 830
+
+label ai_portrait_open:
+    python:
+        # При открытии загружаем последний сохранённый портрет из файла.
+        try:
+            ai_reload_player_portrait_from_file()
+        except Exception as e:
+            print("ai_portrait_open reload err: %s" % e)
+    call screen ai_portrait_screen
     return
 
 label ai_debug_locations:

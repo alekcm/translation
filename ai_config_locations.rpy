@@ -81,9 +81,9 @@ init python:
         "school_gym": ["femininity","exhibitionism","bullying","body_mod"],
         "school_locker_girl": ["exhibitionism","voyeurism","humiliation","femininity","crossdressing"],
         "school_locker_boy": ["bullying","violence","blackmail"],  # опасно идти в мужскую раздевалку
-        "school_toilet": ["exhibitionism","voyeurism","bullying"],
-        "school_toilet_girl": ["exhibitionism","voyeurism"],
-        "school_toilet_boy": ["bullying","violence"],
+        "school_toilet": ["exhibitionism","voyeurism","bullying","urination"],
+        "school_toilet_girl": ["exhibitionism","voyeurism","urination","menstruation_mundane"],
+        "school_toilet_boy": ["bullying","violence","urination"],
 
         # Коммерческая зона - проституция, freeuse, магазины
         "commercial_area": ["*"],
@@ -93,6 +93,20 @@ init python:
         # Парк / пляж / озеро - эксгибиционизм, вуайеризм, свободное использование
         "park_local": ["exhibitionism","voyeurism","freeuse","femininity","bullying"],
         "park_local_market": ["prostitution","freeuse","drugs_light"],
+
+        # Общественные туалеты — grim и физиологичные локации.
+        # Разрешаем и мочеиспускание (бытовое), и exhibitionism/voyeurism/
+        # freeuse. Мужские туалеты дополнительно допускают насилие/буллинг.
+        "park_toilet":            ["exhibitionism","voyeurism","urination","bullying","freeuse"],
+        "park_toilet_boys":       ["urination","bullying","violence","freeuse","voyeurism","humiliation"],
+        "park_toilet_girls":      ["urination","menstruation_mundane","exhibitionism","voyeurism","femininity"],
+        "pub_toilet":             ["urination","exhibitionism","voyeurism","alcohol","freeuse"],
+        "pub_toilet_boys":        ["urination","alcohol","freeuse","violence","bullying","voyeurism","humiliation"],
+        "pub_toilet_girls":       ["urination","menstruation_mundane","alcohol","exhibitionism","voyeurism","femininity"],
+        "trainstation_local_pub_toilet_boys":  ["urination","alcohol","freeuse","violence","bullying","voyeurism","humiliation","prostitution"],
+        "trainstation_local_pub_toilet_girls": ["urination","menstruation_mundane","alcohol","exhibitionism","voyeurism","femininity","prostitution"],
+        "beach_locker_boys":      ["urination","voyeurism","bullying","exhibitionism"],
+        "beach_locker_girls":     ["urination","menstruation_mundane","voyeurism","exhibitionism","femininity"],
         "lake_entrance": ["exhibitionism","voyeurism","freeuse","femininity"],
         "beach": ["exhibitionism","voyeurism","freeuse","femininity","pregnancy","body_mod"],
         "lake_water": ["exhibitionism","voyeurism"],
